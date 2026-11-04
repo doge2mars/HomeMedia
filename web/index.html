@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomeMedia · 家庭影音</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js"></script>
+<style>
+:root{--bg:#08080c;--card:#14141c;--line:#26262f;--txt:#f2f2f5;--mut:#9a9aad;--acc:#ff5a3c}
+*{box-sizing:border-box} body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt);margin:0}
+header{display:flex;gap:10px;align-items:center;padding:14px 40px;background:rgba(8,8,12,0.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;flex-wrap:wrap}
+header h1{font-size:20px;margin:0} header nav button{background:none;border:none;color:var(--mut);font-size:15px;padding:8px 14px;border-radius:999px}
+header nav button.on{color:#fff;background:rgba(255,90,60,0.18);box-shadow:inset 0 0 0 1px rgba(255,90,60,0.5)}
+input,select,button,textarea{padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:#22222b;color:var(--txt);font-size:14px}
+button{cursor:pointer} button.primary{background:var(--acc);border-color:var(--acc)}
+main{padding:20px 40px;max-width:none}
+@media (max-width:900px){ header{padding:12px 16px} main{padding:16px} }
+section{margin:28px 0} h2{font-size:20px;font-weight:700;margin:14px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px}
+.card{background:var(--card);border-radius:16px;overflow:hidden;cursor:pointer;position:relative;border:1px solid transparent;transition:transform .2s, box-shadow .2s, border-color .2s}
+.card:hover{transform:scale(1.04) translateY(-2px);box-shadow:0 16px 32px rgba(0,0,0,0.6);border-color:rgba(255,255,255,0.12)}
+.rating{position:absolute;top:8px;left:8px;z-index:2;background:rgba(0,0,0,0.7);color:#ffb020;font-size:12px;font-weight:700;padding:3px 7px;border-radius:8px}
+.epbadge{position:absolute;top:8px;left:8px;z-index:2;background:rgba(0,0,0,0.75);color:#fff;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px}
+.epbadge b{color:#ff5a3c}
+.sourcechip{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);font-size:12px;color:var(--mut)}
+.progressbar{height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin-top:8px;overflow:hidden}
+.progressbar i{display:block;height:100%;background:var(--acc);border-radius:2px}
+.card img{width:100%;height:270px;object-fit:cover;background:#2a2a35;display:block}
+.card div{padding:10px 12px;font-size:14px} .card div div{padding:0} .card small{color:var(--mut)}
+/* v1.3 LunaTV 式问候横幅：蓝紫粉渐变，不是以前那个“最新入库”横幅 */
+.greetbanner{display:flex;justify-content:space-between;align-items:center;gap:18px;background:linear-gradient(90deg,#4f46e5,#7c3aed,#db2777);border-radius:20px;padding:28px 32px;color:#fff}
+.greetbanner h2{font-size:24px;margin:0 0 6px}
+.greetbanner p{margin:0;color:rgba(255,255,255,0.85);font-size:14px}
+.greetbanner button{background:rgba(255,255,255,0.16);border-color:rgba(255,255,255,0.35);color:#fff}
+.greeticon{font-size:44px;width:72px;height:72px;min-width:72px;border:1px solid rgba(255,255,255,0.4);border-radius:50%;display:flex;align-items:center;justify-content:center}
+.muted{color:var(--mut);font-size:13px} .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#fff;color:#111;padding:10px 18px;border-radius:20px;z-index:50;display:none;max-width:90vw}
+video{width:100%;max-height:62vh;background:#000;border-radius:12px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0} .tabs button.on{background:var(--acc);border-color:var(--acc)}
+
+.ep{display:inline-block;padding:7px 11px;margin:4px;background:#26262f;border-radius:8px;cursor:pointer} .ep.on{background:var(--acc)} .ep:hover{background:#3a3a48}
+table{width:100%;border-collapse:collapse;font-size:14px} td,th{padding:8px;border-bottom:1px solid var(--line);text-align:left}
+.hero{display:flex;gap:18px;flex-wrap:wrap} .hero img{width:200px;height:280px;object-fit:cover;border-radius:12px;background:#2a2a35}
+.view{display:none} .view.on{display:block}
+/* v0.5 LunaTV 式：横向滚动行（不是全展开的长网格），卡片固定宽 */
+.row{display:flex;gap:18px;overflow-x:auto;padding-bottom:12px;scrollbar-width:none}
+.row::-webkit-scrollbar{display:none}
+.row .card{min-width:200px;max-width:200px;flex-shrink:0}
+.row .card img{height:280px}
+.rowhead{display:flex;justify-content:space-between;align-items:center}
+.rowhead h2{display:flex;align-items:center;gap:8px}
+.rowhead button{background:none;border:none;color:var(--mut);font-size:13px;padding:4px 6px}
+.rowhead button.on{color:#fff;background:#26262f;border-radius:8px}
+.navdot{display:inline-block;background:#ff3b30;color:#fff;font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;margin-left:4px}
+.wantbtn{margin-top:8px;width:100%;text-align:center}
+.rowhead button.arrow{background:#26262f;color:#fff;font-size:20px;font-weight:700;padding:6px 14px;border:1px solid var(--line);border-radius:8px}
+/* v0.9：箭头搬到行两侧、贴着视频，像 LunaTV/Netflix 那样悬在行边上 */
+.rowwrap{position:relative}
+.sidearrow{position:absolute;top:50%;transform:translateY(-50%);z-index:5;width:44px;height:72px;background:rgba(0,0,0,0.65);color:#fff;font-size:26px;font-weight:700;border:1px solid rgba(255,255,255,0.2);border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0.9}
+.sidearrow.left{left:4px} .sidearrow.right{right:4px}
+.sidearrow:hover{background:rgba(255,90,60,0.85)}
+@media (hover:hover){ .sidearrow{opacity:0} .rowwrap:hover .sidearrow{opacity:0.9} }
+/* v1.1 LunaTV 式播放页：左播放器（3份）+ 右侧栏（1份，选集/换源标签页），窄屏自动上下叠 */
+.playlayout{display:flex;gap:16px;align-items:flex-start}
+.playmain{flex:3;min-width:0}
+.playside{flex:1;min-width:280px;max-width:360px;max-height:62vh;overflow-y:auto;background:var(--card);border-radius:12px;padding:12px;position:sticky;top:70px}
+.sidetabs{display:flex;gap:6px;margin-bottom:10px}
+.sidetabs button.on{background:var(--acc);border-color:var(--acc)}
+.srclist button{display:block;width:100%;text-align:left;margin-bottom:6px}
+.srclist button.on{background:var(--acc);border-color:var(--acc)}
+@media (max-width:900px){ .playlayout{flex-direction:column} .playside{max-width:none;max-height:none;position:static} }
+.herobanner{display:flex;gap:18px;background:#1b1b22;border-radius:14px;padding:16px;align-items:center;cursor:pointer}
+.herobanner img{width:150px;height:210px;object-fit:cover;border-radius:10px;background:#2a2a35}
+details{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:14px 0;background:var(--card)}
+details summary{cursor:pointer;font-weight:600;padding:4px 0}
+details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left:8px}
+</style></head>
+<body>
+<header><h1 style="display:flex;align-items:center;gap:10px"><svg width="34" height="34" viewBox="0 0 40 40"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5a3c"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="40" height="40" rx="10" fill="url(#lg)"/><path d="M17 13 L29 20 L17 27 Z" fill="#fff"/></svg><span>HomeMedia <small style="color:var(--mut);font-weight:400;font-size:13px">家庭影音</small></span></h1> <span class="muted">v2.1</span>
+<nav>
+<button data-view="home" class="on" onclick="showView('home',this)">🏠 首页</button>
+<button data-view="shelf" onclick="goShelfAll()">🌐 货架</button>
+<button data-view="search" onclick="showView('search',this)">🔍 搜索</button>
+<button data-cat="电影" onclick="goNavCat('电影')">🎬 电影</button>
+<button data-cat="剧集" onclick="goNavCat('剧集')">📺 剧集</button>
+<button data-cat="短剧" onclick="goNavCat('短剧')">⏯ 短剧</button>
+<button data-cat="动漫" onclick="goNavCat('动漫')">🐱 动漫</button>
+<button data-cat="综艺" onclick="goNavCat('综艺')">🍀 综艺</button>
+<button data-cat="体育" onclick="goNavCat('体育')">🏅 体育</button>
+<button data-view="live" onclick="showView('live',this)">📡 直播</button>
+<button data-view="fav" onclick="showView('fav',this)">👤 我的</button>
+<button data-view="settings" onclick="showView('settings',this)">⚙️ 设置</button>
+</nav>
+<span id="who" class="muted" style="margin-left:auto"></span>
+</header>
+<main>
+<div id="toast" class="toast"></div>
+
+<div id="login" style="background:var(--card);padding:14px;border-radius:12px">
+<b>登录</b> <input id="u" placeholder="用户名" value="admin"> <input id="p" type="password" placeholder="密码" value="admin123">
+<button class="primary" onclick="doLogin()">登录</button> <button onclick="doRegister()">注册新用户</button>
+<span class="muted">原型默认 admin / admin123。电视端 Selene-TV 用同样地址 + 账号登录，服务器地址填 http://192.168.123.240:8090。</span>
+</div>
+
+<!-- 首页：全宽 LunaTV/Netflix 式布局 + 问候横幅（不是以前那个“最新入库”横幅） -->
+<div id="view-home" class="view on">
+<section class="greetbanner"><div><h2 id="greetTitle">下午好</h2><p>发现更多精彩影视内容</p><div style="margin-top:14px"><button onclick="showView('shelf')">🌐 去货架逛逛</button> <button onclick="showView('fav')" style="margin-left:8px">👤 我的收藏</button></div></div><div class="greeticon">🎬</div></section>
+<section id="homeContinueSec"><div class="rowhead"><h2>▶ 继续观看</h2><span><button onclick="showView('fav')">查看更多 ▸</button></span></div><div class="rowwrap"><div id="continueGrid" class="row"><span class="muted">登录后显示</span></div><button class="sidearrow left" onclick="scrollRow('continueGrid',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('continueGrid',1)">&gt;</button></div></section>
+<section id="upcomingSec"><div class="rowhead"><h2>📅 即将上映</h2><span><button id="upFAll" class="on" onclick="upcomingFilter('all',this)">全部</button> <button id="upFMovie" onclick="upcomingFilter('电影片',this)">电影</button> <button id="upFTv" onclick="upcomingFilter('连续剧',this)">电视剧</button> <button onclick="refreshUpcoming(true)">刷新 ↻</button> <button onclick="showView('upcoming')">查看全部日程 ▸</button> <button onclick="showView('fav')">我的想看 ▸</button></span></div><div class="rowwrap"><div id="upcomingRow" class="row"><span class="muted">正在拉上映数据…</span></div><button class="sidearrow left" onclick="scrollRow('upcomingRow',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('upcomingRow',1)">&gt;</button></div><div id="upcomingMsg" class="muted"></div></section>
+<section><div id="homeRows"></div></section>
+</div>
+
+<!-- 货架：独立入口，不再塞在首页下面 -->
+<div id="view-shelf" class="view">
+<section><h2>货架 · 按条件筛选（不用先想剧名，点卡片直接开详情）</h2>
+
+<input id="fyear" list="yearList" placeholder="年份，如 2024" style="width:110px"><datalist id="yearList"></datalist>
+<input id="fgenre" list="genreList" placeholder="类型，如 古装/喜剧" style="width:150px"><datalist id="genreList"></datalist>
+<input id="fregion" list="regionList" placeholder="地区，如 大陆" style="width:110px"><datalist id="regionList"></datalist>
+<button onclick="loadCatalog()">筛选</button> <button onclick="clearShelfFilters()">清除筛选</button> <button onclick="syncCatalog()">同步目录（后台）</button>
+<span id="syncmsg" class="muted"></span>
+<div id="catalog" class="grid"></div>
+<div style="margin-top:12px"><button id="shelfMore" onclick="shelfShowMore()" style="display:none">加载更多</button> <button onclick="shelfCollapse()" style="display:none" id="shelfLess">收起</button> <span id="shelfCount" class="muted"></span></div></section>
+</div>
+
+<!-- 搜索 -->
+<div id="view-search" class="view">
+<section><h2>搜索</h2>
+<input id="q" placeholder="搜剧名，例如：繁花" style="width:60%"> <button class="primary" onclick="doSearch()">搜索</button>
+<div class="muted">结果按标题聚合：同一部剧在多个源都有时，点进去可以在播放源之间切换。</div>
+<div id="results" class="grid" style="margin-top:14px"></div></section>
+</div>
+
+<!-- 详情 = 播放页：播放器只在这里，离开本页就停播、隐藏，不会跟到首页/搜索/设置 -->
+<div id="view-detail" class="view">
+<section id="playerSec" style="display:none">
+<h2 id="ptitle">正在播放</h2>
+<div class="playlayout" id="playLayout">
+<div class="playmain">
+<video id="v" controls playsinline></video>
+<div class="muted" id="pstatus"></div>
+<div style="margin-top:10px"><button onclick="favCurrent()">⭐ 收藏当前</button> <button onclick="nextEp()">▶ 下一集</button> <span id="favmsg" class="muted"></span></div>
+</div>
+<aside class="playside" id="playSide">
+<div class="sidetabs"><button id="sideTabEps" class="on" onclick="showSideTab('eps')">选集</button><button id="sideTabSrc" onclick="showSideTab('src')">换源</button><button onclick="toggleSide()" title="收起右侧栏，播放器变全宽">收起 ▸</button></div>
+<div id="sideEps"><div class="muted" id="epsTitle">选集</div><div id="eps" style="margin-top:8px"></div></div>
+<div id="sideSrc" style="display:none"><div class="muted">播放源（带测速与分辨率，点一个换源、保持当前进度）</div><div id="srctabs" class="srclist" style="margin-top:8px"></div></div>
+</aside>
+</div>
+<div style="margin-top:10px"><button id="sideExpandBtn" style="display:none" onclick="toggleSide()">◂ 展开选集 / 换源</button></div>
+</section>
+<section><div id="detail"></div></section>
+</div>
+
+<!-- 直播 -->
+<div id="view-live" class="view">
+<section><h2>直播</h2><div class="muted">直播不走去广告代理（和 LunaTV 直播页 filterAds=false 一致），直接播源站 m3u8。先在“设置 → 直播源”里加一个 M3U 地址。</div>
+<div id="liveGroups" style="margin-top:12px"></div><div id="liveChannels"></div></section>
+</div>
+
+<!-- 我的：也是横向行，不再两大段网格全展开；点“展开全部”才变网格 -->
+<div id="view-upcoming" class="view">
+<section><div class="rowhead"><h2>📅 即将上映日程</h2><span><button id="upViewTimeline" class="on" onclick="setUpView('timeline',this)">时间线</button> <button id="upViewGrid" onclick="setUpView('grid',this)">网格</button> <button onclick="refreshUpcoming(true)">刷新 ↻</button></span></div>
+<div style="margin:12px 0;display:flex;gap:10px;flex-wrap:wrap;align-items:center">类型 <select id="upFType"><option value="all">全部</option><option value="电影片">电影</option><option value="连续剧">电视剧</option></select> 时间段 <select id="upFPeriod"><option value="all">全部（过去7天～未来90天）</option><option value="past">刚上映（过去7天）</option><option value="today">今日上映</option><option value="7">未来7天</option><option value="30">未来30天</option><option value="90">未来90天</option></select> 地区 <select id="upFRegion"><option value="all">全部</option></select> 题材 <select id="upFGenre"><option value="all">全部</option></select> <input id="upFSearch" placeholder="搜片名/导演/主演" style="width:220px"> <button class="primary" onclick="renderUpcomingPage()">筛选</button> <span id="upPageCount" class="muted"></span></div>
+<div id="upTimeline"></div><div id="upGrid" class="grid" style="display:none"></div><div id="upPageMsg" class="muted"></div></section>
+</div>
+<div id="view-fav" class="view">
+<section><div class="rowhead"><h2>🔔 我想看</h2><button onclick="clearWants()">清空想看</button></div><div id="wantGrid" class="grid"></div><div id="wantEmpty" class="muted"></div></section>
+<section><div class="rowhead"><h2>⭐ 我的收藏</h2><button id="favExpandBtn" onclick="toggleFavExpand()">展开全部 ▾</button></div><div class="rowwrap"><div id="favGrid" class="row"></div><button class="sidearrow left" onclick="scrollRow('favGrid',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('favGrid',1)">&gt;</button></div></section>
+<section><div class="rowhead"><h2>▶ 继续观看</h2><span><button id="contExpandBtn" onclick="toggleContExpand()">展开全部 ▾</button> <button onclick="clearContinueRecords()">清空观看记录</button></span></div><div class="rowwrap"><div id="favContinue" class="row"></div><button class="sidearrow left" onclick="scrollRow('favContinue',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('favContinue',1)">&gt;</button></div></section>
+</div>
+
+<!-- 设置 -->
+<div id="view-settings" class="view">
+<p class="muted">设置按组折叠：点组名展开，默认只开视频源，其他组收着，不再一屏拉到底。</p>
+<details><summary>首页板块显示（可开关）</summary><div class="muted">勾上的板块才在首页出现，改完点保存，下次进首页生效。“热门”目前是按目录库最新入库排的，因为源站不给播放量，没有真实热度数据；“即将上映”在这里勾选开关，数据源（慢看/TMDB/关闭）在下面“即将上映数据源”那组里选，数据源关掉则首页也不显示该板块。</div>
+<div style="margin-top:10px">
+<label><input type="checkbox" id="chkHomeContinue" checked> 继续观看</label>
+<label style="margin-left:12px"><input type="checkbox" id="chkHomeHotMovies" checked> 热门电影</label>
+<label style="margin-left:12px"><input type="checkbox" id="chkHomeHotTv" checked> 热门剧集</label>
+<label style="margin-left:12px"><input type="checkbox" id="chkHomeAnime" checked> 最新动漫</label>
+<label style="margin-left:12px"><input type="checkbox" id="chkHomeVariety" checked> 热门综艺</label>
+<label style="margin-left:12px"><input type="checkbox" id="chkHomeShort" checked> 短剧</label>
+<label style="margin-left:12px"><input type="checkbox" id="chkHomeUpcoming" checked> 即将上映</label>
+<button class="primary" onclick="saveHomeSections()" style="margin-left:12px">保存板块设置</button></div>
+</details>
+<details><summary>视频源（苹果 CMS）<span id="srcSummary"></span></summary><div class="muted">单个添加：key + 名称 + api 地址（形如 https://xxx/api.php/provide/vod/）。电视端 Selene-TV 的搜索资源列表就是从这里来的，改完电视端不用改 APK。源管理仅站长（owner）可改，普通用户只能看、只能用。</div>
+<table id="srcTable"></table>
+<div style="margin-top:10px"><input id="skey" placeholder="key，如 ffzy" style="width:110px"> <input id="sname" placeholder="名称" style="width:120px"> <input id="sapi" placeholder="api 地址" style="width:46%"> <button class="primary" onclick="addSource()">添加/更新源</button></div>
+<div style="margin-top:10px"><b>订阅导入（配置订阅）</b> <input id="subUrl" placeholder="订阅地址，返回 [{key,name,api}] 或 {apiSites:[...]} 或 {api_site:{...}}" style="width:58%"> <button class="primary" onclick="subscribeSources()">导入</button> <span id="subMsg" class="muted"></span><div class="muted">订阅地址可以是公开源列表，也可以是你放在 NAS/电视盒上的局域网地址；导入时按归一化 api 去重，已有相同 api 的源只更新名称、不重复建。</div></div>
+<div style="margin-top:10px"><button class="primary" onclick="testAllSources()">一键测试全部源</button> <button onclick="dedupeSources()">源去重（按 api）</button> <button onclick="disableFailedSources()">禁用测试失败的源</button> <span id="testAllMsg" class="muted"></span></div>
+<div id="testAllTable" style="margin-top:10px"></div>
+</details>
+<details><summary>目录同步（货架）<span id="syncSummary"></span></summary><div class="muted">勾上的源是主源：同步时只拉这些源、每类拉下面填的页数；没勾的源是备用：不进货架，但实时搜索、点播照常用。同步是后台跑的，跑的时候旧货架照常用，跑完货架就变厚了。定时点模式：下面填了时间（北京时间），就每天这个点拉一次、顺带把上映数据也刷了，间隔那项就不起作用；不填时间就按间隔拉。</div>
+<div style="margin-top:10px">每类拉 <input id="syncPages" type="number" min="1" max="20" value="10" style="width:60px"> 页
+<label style="margin-left:12px"><input type="checkbox" id="syncAuto"> 自动同步</label> 每 <select id="syncInterval"><option value="6">6</option><option value="12">12</option><option value="24" selected>24</option><option value="48">48</option></select> 小时 <label style="margin-left:12px">每天定时点 <input id="syncDailyTime" type="time" style="width:110px"></label> <span class="muted">填了就每天这个点拉（比如半夜 03:00），不填按间隔拉</span>
+<button class="primary" onclick="saveSyncConfig()" style="margin-left:12px">保存同步设置</button>
+<button onclick="triggerSync()" style="margin-left:6px">立即同步</button> <span id="syncMsg" class="muted"></span></div>
+<div id="syncSources" style="margin-top:10px"></div>
+<div style="margin-top:8px"><button onclick="syncSelectAll(true)">全选</button> <button onclick="syncSelectAll(false)" style="margin-left:6px">全不选</button> <span class="muted">全不选 = 不拉任何源，货架不再更新（不建议）。</span></div>
+</details>
+<details><summary>图片代理（服务端拉图）</summary><div class="muted">海报是服务端去源站拉的：先直连，15 秒超时或失败后，按下面列表顺序走代理重试，成功才进缓存。直连快的国内图床不受影响，只有拉不到的图才走代理。一行一个，形如 http://192.168.123.1:7890；留空 = 只直连。仅站长可改。</div>
+<div style="margin-top:10px"><textarea id="imgProxies" rows="3" style="width:70%" placeholder="http://192.168.123.1:7893"></textarea>
+<button class="primary" onclick="saveImageProxies()" style="margin-left:12px">保存图片代理</button> <span id="imgProxyMsg" class="muted"></span></div>
+</details>
+<details><summary>直播源<span id="liveSummary"></span></summary><div class="muted">单个添加：M3U 地址；订阅导入：M3U、TVBox TXT（分组,#genre# / 频道,地址）、TVBox JSON（lives 数组）、直播导入 JSON（sources 数组）都会自动识别。家里电视盒里的直播源，不管是 M3U 文件地址还是 TXT/JSON 订阅地址，贴进来就行。</div>
+<table id="liveTable"></table>
+<div style="margin-top:10px"><input id="lkey" placeholder="key" style="width:110px"> <input id="lname" placeholder="名称" style="width:120px"> <input id="lurl" placeholder="M3U 地址" style="width:46%"> <button class="primary" onclick="addLive()">添加直播源</button></div>
+<div style="margin-top:10px"><b>订阅导入</b> <input id="liveSubUrl" placeholder="直播订阅地址" style="width:46%"> <input id="liveSubName" placeholder="订阅名（作 key 前缀）" style="width:150px"> <button class="primary" onclick="subscribeLive()">导入</button> <span id="liveSubMsg" class="muted"></span></div>
+</details>
+<details><summary>账户管理</summary><div class="muted">站长（owner）可加人、删人；每人自己的播放记录、收藏、设置都是隔离的，换设备登录就跟过去，不用重新配。</div>
+<table id="userTable"></table>
+<div style="margin-top:10px"><input id="nu" placeholder="新用户名（≥3字）" style="width:160px"> <input id="np" type="password" placeholder="密码（≥6位）" style="width:160px"> <select id="nrole"><option value="user">普通用户</option><option value="admin">管理员</option></select> <button class="primary" onclick="addUser()">添加账户</button></div>
+<div style="margin-top:10px"><b>改自己的密码</b> <input id="oldp" type="password" placeholder="旧密码" style="width:150px"> <input id="newp" type="password" placeholder="新密码（≥6位）" style="width:150px"> <button onclick="changePw()">改密码</button></div>
+</details>
+<details><summary>播放设置（跟人走，服务端存）</summary><div class="muted">存在服务端、按账号存，电视、网页、手机登录同一个账号就用同一套，不用每台设备重配。倍速、跳过片头片尾是预留项，播放器下一步接。</div>
+<div style="margin-top:10px">默认倍速 <select id="setSpeed"><option value="1">1.0</option><option value="1.25">1.25</option><option value="1.5">1.5</option><option value="2">2.0</option></select>
+<label style="margin-left:12px"><input type="checkbox" id="setSkip"> 跳过片头片尾（有数据时）</label>
+<label style="margin-left:12px">图片代理 <select id="setImg"><option value="server">服务端代理（默认）</option><option value="direct">直连</option></select></label>
+<button class="primary" onclick="saveUserSettings()" style="margin-left:12px">保存设置</button></div>
+</details>
+<details><summary>服务端缓存</summary><div class="muted">搜索结果缓存 10 分钟、详情 30 分钟、直播频道 6 小时、分类 24 小时、海报 7 天。缓存是给“不常变的数据”准备的：新剧上架、集数更新，搜索/详情在缓存期内会晚一点看到，点“刷新”或“清空缓存”就实时拉。m3u8 播放列表本身不缓存，播的时候永远实时取，断点和收藏存在数据库里，不走缓存。</div>
+<div style="margin-top:10px"><button onclick="clearCache()">清空全部服务端缓存</button> <span class="muted">清空后下一次搜索/开直播会慢一次，随后重新缓存。</span></div>
+</details>
+<details><summary>即将上映数据源</summary><div class="muted">默认慢看（抓慢看网电影/电视剧时间表，国内站直连，不用 key，数据是过去 7 天到未来 90 天）。TMDB 是官方接口、需填免费 key，海外站走代理更稳，只给电影。关掉则首页不显示即将上映板块。上映数据一天缓存一次，点“立即刷新”可手动刷。</div>
+<div style="margin-top:10px">数据源 <select id="upSource"><option value="manmankan">慢看（默认）</option><option value="tmdb">TMDB（需 key）</option><option value="off">关闭</option></select> TMDB Key <input id="tmdbKey" placeholder="TMDB API key（选 TMDB 时填）" style="width:280px"> <button class="primary" onclick="saveUpcomingConfig()">保存</button> <button onclick="refreshUpcoming(true)">立即刷新上映数据</button> <span id="upCfgMsg" class="muted"></span></div></details>
+<details><summary>图片代理</summary><div class="muted">全部海报走服务端 /api/image-proxy + 磁盘缓存 + 目录同步后预取。电视端源站海报因 APK 只改写豆瓣/Bangumi 图，仍直连——电视海报想快，把图床域名加进你那边的 DirectMedia 直连规则。</div></details>
+</div>
+</main>
+<script>
+let cur=null, hls=null, curSources=[], curSrcIdx=0;
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none', 3500); }
+async function api(path, opts={}){ const r=await fetch(path, opts); if(r.status===401){ document.getElementById('login').style.display='block'; throw new Error('请先登录'); } if(!r.ok){ let e=''; try{ const j=await r.json(); e=j.error||j.status||'' }catch(_){} throw new Error(e||('请求失败 '+r.status)); } return r.json(); }
+function stopPlayback(){ const v=document.getElementById('v'); if(hls){ hls.destroy(); hls=null; } if(v){ v.pause(); v.removeAttribute('src'); v.load(); } document.getElementById('playerSec').style.display='none'; if(curES){ curES.close(); curES=null; } }
+function showView(v, btn){ if(v!=='detail') stopPlayback(); document.querySelectorAll('.view').forEach(e=>e.classList.remove('on')); document.getElementById('view-'+v).classList.add('on'); document.querySelectorAll('header nav button').forEach(b=>b.classList.remove('on')); if(btn) btn.classList.add('on'); else { const nb=document.querySelector(`header nav button[data-view="${v}"]`); if(nb) nb.classList.add('on'); } window.scrollTo(0,0); if(v==='home'){ loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); } if(v==='shelf'){ markShelfTab(); if(!shelfItems.length) loadCatalog(); } if(v==='fav'){ loadWants(); loadFav(); loadContinueInto('favContinue'); } if(v==='upcoming'){ loadUpcomingPage(); } if(v==='live'){ loadLive(); } if(v==='settings'){ loadSettings(); loadUsers(); loadUserSettings(); loadSyncConfig(); loadUpcomingConfig(); loadImageProxies(); } }
+function posterUrl(p){ if(!p) return ''; return p.startsWith('http') ? '/api/image-proxy?url='+encodeURIComponent(p) : p; }
+function card(item, onclick, extra){ const d=document.createElement('div'); d.className='card'; const rating=(item.rating&&item.rating!=='0'&&item.rating!=='0.0')?`<span class="rating">★ ${item.rating}</span>`:''; const epbadge=item.epBadge?`<span class="epbadge">${item.epBadge}</span>`:''; const chip=item.sourceChip?`<div><span class="sourcechip">${item.sourceChip}</span></div>`:''; const prog=(item.progress!==undefined&&item.progress!==null)?`<div class="progressbar"><i style="width:${Math.round(Math.min(1,Math.max(0,item.progress))*100)}%"></i></div>`:''; d.innerHTML=`${rating}${epbadge}<img loading="lazy" src="${posterUrl(item.poster||item.cover||'')}" onerror="this.style.display='none'"><div>${item.title}<br><small>${item.year||''} ${item.type||item.type_name||''} ${item.source_name||''} ${item.nsrc?('· '+item.nsrc+'个源'):''}</small>${chip}${prog}${extra||''}</div>`; d.onclick=onclick; return d; }
+function updateGreeting(){ const who=document.getElementById('who').textContent.replace('已登录：','').trim(); const h=new Date().getHours(); const g=h<6?'夜深了':h<12?'上午好':h<14?'中午好':h<18?'下午好':'晚上好'; const el=document.getElementById('greetTitle'); if(el) el.textContent=`${g}，${who||'你'} 👋`; }
+async function doLogin(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('login').style.display='none'; toast('登录成功'); updateGreeting(); loadUserSpeed(); homeLoaded=false; loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); }catch(e){ toast('登录失败：'+e.message); } }
+async function doRegister(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('login').style.display='none'; toast('注册并登录成功'); }catch(e){ toast('注册失败：'+e.message); } }
+let shelfItems=[], shelfShown=0;
+function renderShelf(){ const el=document.getElementById('catalog'); el.innerHTML=''; shelfItems.slice(0,shelfShown).forEach(it=>el.appendChild(card(it, ()=>openTitle(it.title)))); document.getElementById('shelfCount').textContent=`已显示 ${Math.min(shelfShown,shelfItems.length)} / ${shelfItems.length} 部`; document.getElementById('shelfMore').style.display=shelfShown<shelfItems.length?'':'none'; document.getElementById('shelfLess').style.display=shelfShown>30?'':'none'; }
+function shelfShowMore(){ shelfShown+=30; renderShelf(); }
+function shelfCollapse(){ shelfShown=30; renderShelf(); window.scrollTo(0,0); }
+// 货架分类改走“标签页”：顶部按钮就是分类，点中哪个哪个亮起；每个分类各存一套筛选条件，
+// 不再共用一根筛选栏——今晚那三连 bug（全局下拉、条件串位、旧选项残留）全是共用结构闹的。
+let shelfType='';
+const shelfTabFilters={};
+function tabFilterState(t){ if(!shelfTabFilters[t]) shelfTabFilters[t]={year:'',genre:'',region:''}; return shelfTabFilters[t]; }
+function saveShelfInputs(){ const s=tabFilterState(shelfType); s.year=document.getElementById('fyear').value; s.genre=document.getElementById('fgenre').value; s.region=document.getElementById('fregion').value; }
+function loadShelfInputs(){ const s=tabFilterState(shelfType); document.getElementById('fyear').value=s.year; document.getElementById('fgenre').value=s.genre; document.getElementById('fregion').value=s.region; }
+function markShelfTab(){ document.querySelectorAll('header nav button[data-cat]').forEach(b=>b.classList.toggle('on', b.dataset.cat===shelfType)); const sb=document.querySelector('header nav button[data-view="shelf"]'); if(sb) sb.classList.toggle('on', shelfType===''); }
+async function selectShelfTab(t){ saveShelfInputs(); shelfType=t; markShelfTab(); loadShelfInputs(); document.getElementById('catalog').innerHTML='<div class="muted">正在加载…</div>'; await loadShelfMeta(t); loadCatalog(); }
+function goNavCat(t){ showView('shelf'); selectShelfTab(t); }
+function goShelfAll(){ showView('shelf'); selectShelfTab(''); }
+function goShelf(t){ showView('shelf'); selectShelfTab(t); }
+async function clearShelfFilters(){ const s=tabFilterState(shelfType); s.year=''; s.genre=''; s.region=''; loadShelfInputs(); await loadShelfMeta(shelfType); loadCatalog(); }
+async function loadCatalog(){ try{ const t=shelfType, y=document.getElementById('fyear').value, g=document.getElementById('fgenre').value, rg=document.getElementById('fregion').value; const d=await api(`/api/catalog?type=${encodeURIComponent(t)}&year=${y}&genre=${encodeURIComponent(g)}&region=${encodeURIComponent(rg)}&limit=200`); shelfItems=d.items||[]; shelfShown=30; const el=document.getElementById('catalog'); if(!shelfItems.length) el.innerHTML='<div class="muted">目录还是空的，先点“同步目录”，或去搜索。</div>'; else renderShelf(); }catch(e){ toast(e.message); } }
+let homeLoaded=false;
+function scrollRow(id, dir){ const el=document.getElementById(id); if(el) el.scrollBy({left: dir*el.clientWidth*0.8, behavior:'smooth'}); }
+function toggleRowExpand(id, btn){ const el=document.getElementById(id); const ex=el.classList.toggle('grid'); el.classList.toggle('row', !ex); btn.textContent=ex?'收起 ▴':'展开全部 ▾'; }
+
+async function loadHome(){ if(homeLoaded) return; homeLoaded=true; let cfg={}; try{ cfg=await api('/api/user-settings'); }catch(e){} const on=(k)=>cfg[k]===undefined||cfg[k]==='1'; document.getElementById('homeContinueSec').style.display=on('home_continue')?'':'none'; document.getElementById('upcomingSec').style.display=on('home_upcoming')?'':'none'; const rows=document.getElementById('homeRows'); rows.innerHTML=''; const secs=[{key:'home_hotmovies', title:'🎬 热门电影', type:'电影'},{key:'home_hottv', title:'📺 热门剧集', type:'剧集'},{key:'home_anime', title:'🐱 最新动漫', type:'动漫'},{key:'home_variety', title:'🍀 热门综艺', type:'综艺'},{key:'home_short', title:'⏯ 短剧', type:'短剧'}]; let idx=0; for(const s of secs){ if(!on(s.key)) continue; try{ const d=await api(`/api/catalog?type=${encodeURIComponent(s.type)}&limit=12`); if(!d.items||!d.items.length) continue; const rid='homeRow'+(idx++); const sec=document.createElement('section'); sec.innerHTML=`<div class="rowhead"><h2>${s.title}</h2><span><button onclick="toggleRowExpand('${rid}',this)">展开全部 ▾</button> <button onclick="goShelf('${s.type}')">更多 ▸</button></span></div><div class="rowwrap"><div class="row" id="${rid}"></div><button class="sidearrow left" onclick="scrollRow('${rid}',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('${rid}',1)">&gt;</button></div>`; rows.appendChild(sec); const el=sec.querySelector('.row'); d.items.forEach(it=>el.appendChild(card(it, ()=>openTitle(it.title)))); }catch(e){} } }
+
+async function saveHomeSections(){ try{ await api('/api/user-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({home_continue:document.getElementById('chkHomeContinue').checked?'1':'0', home_hotmovies:document.getElementById('chkHomeHotMovies').checked?'1':'0', home_hottv:document.getElementById('chkHomeHotTv').checked?'1':'0', home_anime:document.getElementById('chkHomeAnime').checked?'1':'0', home_variety:document.getElementById('chkHomeVariety').checked?'1':'0', home_short:document.getElementById('chkHomeShort').checked?'1':'0', home_upcoming:document.getElementById('chkHomeUpcoming').checked?'1':'0'})}); homeLoaded=false; toast('首页板块已保存，下次进首页生效'); }catch(e){ toast(e.message); } }
+async function syncCatalog(){ try{ document.getElementById('syncmsg').textContent='同步已开始（后台，约1-3分钟，完事自动预取海报）…'; await api('/api/catalog/sync',{method:'POST'}); setTimeout(()=>{ homeLoaded=false; loadHome(); loadCatalog(); }, 60000); }catch(e){ if(e.message.includes('409')||e.message.includes('already')){ document.getElementById('syncmsg').textContent='同步已在跑，别重复点，等它跑完。'; } else toast(e.message); } }
+function toggleFavExpand(){ const el=document.getElementById('favGrid'); const ex=el.classList.toggle('grid'); el.classList.toggle('row', !ex); document.getElementById('favExpandBtn').textContent=ex?'收起 ▴':'展开全部 ▾'; }
+function toggleContExpand(){ const el=document.getElementById('favContinue'); const ex=el.classList.toggle('grid'); el.classList.toggle('row', !ex); document.getElementById('contExpandBtn').textContent=ex?'收起 ▴':'展开全部 ▾'; }
+function showSideTab(tab){ document.getElementById('sideEps').style.display=tab==='eps'?'':'none'; document.getElementById('sideSrc').style.display=tab==='src'?'':'none'; document.getElementById('sideTabEps').className=tab==='eps'?'on':''; document.getElementById('sideTabSrc').className=tab==='src'?'on':''; }
+function toggleSide(){ const side=document.getElementById('playSide'); const hidden=side.style.display==='none'; side.style.display=hidden?'':'none'; document.getElementById('sideExpandBtn').style.display=hidden?'none':''; }
+function toggleDetailEps(){ const el=document.getElementById('detailEps'); if(!el) return; el.style.display=el.style.display==='none'?'block':'none'; }
+function agg(results){ const m={}; results.forEach(r=>{ const k=r.title+'|'+r.year; if(!m[k]) m[k]={title:r.title, poster:r.poster, year:r.year, type:r.type_name, source_name:r.source_name, nsrc:0, first:r}; m[k].nsrc++; }); return Object.values(m); }
+let searchAbort=null;
+async function doSearch(title){ try{ const q=title||document.getElementById('q').value; if(!q) return; if(searchAbort) searchAbort.abort(); searchAbort=new AbortController(); const el=document.getElementById('results'); el.innerHTML='<div class="muted">正在并行搜索各源…</div>'; const r=await fetch('/api/search?q='+encodeURIComponent(q),{signal:searchAbort.signal}); if(r.status===401) throw new Error('请先登录'); const d=await r.json(); el.innerHTML=''; if(!d.results.length){ el.innerHTML='<div class="muted">没有搜到，换个关键词，或去设置里检查源是否被禁用/失效。</div>'; return; } agg(d.results).forEach(it=>el.appendChild(card(it, ()=>openTitle(it.title)))); }catch(e){ if(e.name==='AbortError') return; toast(e.message); } }
+let curES=null, curSpeed={};
+function speedLabel(s){ if(!curSpeed[s.source]) return ''; const sp=curSpeed[s.source]; return sp.speed_kbs? ` · ${(sp.speed_kbs/1024).toFixed(2)} MB/s${sp.resolution?' · '+sp.resolution:''}` : ''; }
+function sortBySpeed(){ curSources.sort((a,b)=>{ const sa=curSpeed[a.source]?.speed_kbs||-1, sb=curSpeed[b.source]?.speed_kbs||-1; return sb-sa; }); }
+let resumeByEpisode={}, resumeRecord=null;
+async function loadResumeForTitle(title){ resumeByEpisode={}; resumeRecord=null; try{ const d=await api('/api/playrecords'); Object.entries(d).forEach(([key,rec])=>{ if(rec.search_title===title||rec.title===title){ rec.key=key; rec.source=key.split('+')[0]; const idx=(rec.index||0); if(!resumeByEpisode[idx]||rec.save_time>resumeByEpisode[idx].save_time) resumeByEpisode[idx]=rec; if(!resumeRecord||rec.save_time>resumeRecord.save_time) resumeRecord=rec; } }); }catch(e){} }
+function resumePlay(){ if(!resumeRecord||!curSources.length) return; let idx=curSources.findIndex(s=>s.source===resumeRecord.source); if(idx<0) idx=0; const ep=Math.min(resumeRecord.index||0, (curSources[idx].episodes||[]).length-1); if(ep<0) return toast('可续看的集数在这个源里没有'); playSrc(idx, ep, {startTime: resumeRecord.play_time||0}); }
+async function openTitle(title){
+  if(curES){ curES.close(); curES=null; }
+  curSources=[]; curSpeed={};
+  await loadResumeForTitle(title);
+  showView('detail');
+  const el=document.getElementById('detail');
+  el.innerHTML=`<h2>${title}</h2><p class="muted" id="aggProgress">正在聚合各源…先到的源会先出现，不用等全部，点集数就能播。切到别的视频时，上一个聚合会自动取消，不会后台积压。</p><div id="detailBody"></div>`;
+  curES=new EventSource('/api/detail-aggregate-stream?title='+encodeURIComponent(title));
+  curES.onmessage=(ev)=>{
+    const d=JSON.parse(ev.data);
+    if(d.type==='start'){ document.getElementById('aggProgress').textContent=`正在聚合 ${d.totalSources} 个源…先到的先出现。`; return; }
+    if(d.type==='source'){
+      curSources.push(d.source);
+      const s=curSources[0];
+      document.getElementById('aggProgress').textContent=`已聚合 ${curSources.length} 个源，点集数就能播，不用等全部。`;
+      if(curSources.length===1){ document.getElementById('detailBody').innerHTML=`<div class="hero"><img src="${posterUrl(s.poster)}" onerror="this.style.display='none'"><div style="flex:1"><h2>${s.title}</h2><div class="muted">${s.year||''} ${s.type_name||''}</div><p style="max-width:700px;line-height:1.7">${s.synopsis||'暂无简介'}</p><div id="resumeBox"></div><div class="tabs" id="detailSrcTabs"></div><div style="margin-top:10px"><button onclick="toggleDetailEps()">选集 ▾（点开再看全部集数）</button> <button class="primary" onclick="playFastest()">▶ 播最快源</button> <button id="wantBtn" onclick="toggleWantDetail()">🔔 想看</button> <span class="muted">测速在后台继续，测完源标签会显示速度并按最快排序。</span></div><div id="detailEps" style="display:none"></div></div></div>`; if(resumeRecord&&resumeRecord.play_time>10){ document.getElementById('resumeBox').innerHTML=`<button class="primary" onclick="resumePlay()">▶ 继续播放：第${(resumeRecord.index||0)+1}集 ${Math.floor(resumeRecord.play_time/60)}分（${resumeRecord.source_name||''}）</button>`; } renderDetailSrc(0); refreshWantBtn(s.title); }
+      else { renderDetailSrc(curSrcIdx); }
+      return;
+    }
+    if(d.type==='speed'){ curSpeed[d.source]={speed_kbs:d.speed_kbs, resolution:d.resolution}; const wasPlaying=!!cur; sortBySpeed(); renderDetailSrc(0); if(!wasPlaying){ document.getElementById('aggProgress').textContent=`测速完成，最快的是 ${curSources[0]?.source_name||''}。`; } return; }
+    if(d.type==='complete'){ curES.close(); curES=null; if(!curSources.length){ document.getElementById('detailBody').innerHTML=`<p class="muted">暂无可播源：各源都没有精确匹配到这个标题，换个关键词搜一下。</p>`; } else { document.getElementById('aggProgress').textContent=`聚合完成，共 ${curSources.length} 个源。`; } return; }
+  };
+  curES.onerror=()=>{ if(curES){ curES.close(); curES=null; } if(!curSources.length){ document.getElementById('detailBody').innerHTML=`<p class="muted">聚合失败：网络或源超时，换个关键词或去设置里测一下源。</p>`; } };
+}
+function playFastest(){ if(!curSources.length) return toast('还没有可播的源'); sortBySpeed(); const s=curSources[0]; if(cur&&cur.title===s.title){ playSrc(0, cur.index, {keepTime:true}); } else { playSrc(0,0); } toast('已选最快源：'+s.source_name); }
+function renderDetailSrc(idx){ if(!curSources.length) return; curSrcIdx=idx; const s=curSources[idx]; const tabs=document.getElementById('detailSrcTabs'); if(!tabs) return; tabs.innerHTML=''; curSources.forEach((x,i)=>{ const b=document.createElement('button'); b.textContent=`${x.source_name}（${(x.episodes||[]).length}集）${speedLabel(x)}`; if(i===idx) b.className='on'; b.onclick=()=>renderDetailSrc(i); tabs.appendChild(b); }); const eps=document.getElementById('detailEps'); eps.innerHTML=''; if(!(s.episodes||[]).length){ eps.innerHTML='<div class="muted">这个源没有集数，换个源试试。</div>'; return; } s.episodes.forEach((url,i)=>{ const sp=document.createElement('span'); sp.className='ep'; sp.textContent='第'+(i+1)+'集'; sp.onclick=()=>playSrc(idx,i); eps.appendChild(sp); }); }
+let triedSources=[], endedHandled=false, userSpeed=1;
+async function loadUserSpeed(){ try{ const d=await api('/api/user-settings'); if(d.speed) userSpeed=parseFloat(d.speed)||1; }catch(e){} }
+// LunaTV 式换源保进度：换源前把当前时间存到 sessionStorage（键含新源+新id+集数），
+// 新源就绪后优先读它（用完即删），其次是同集数的历史记录；新源集数不够时降到最后一集、丢弃临时进度。
+function captureTempProgress(newSource, newId, epIdx){ const v=document.getElementById('v'); const t=v?v.currentTime||0:0; if(t>1){ try{ sessionStorage.setItem(`temp_progress_${newSource}_${newId}_${epIdx}`, String(t)); }catch(e){} } return t; }
+function readTempProgress(source, id, epIdx){ try{ const k=`temp_progress_${source}_${id}_${epIdx}`; const v=sessionStorage.getItem(k); if(v){ sessionStorage.removeItem(k); const t=parseFloat(v); if(t>1) return t; } }catch(e){} return 0; }
+function playSrc(srcIdx, epIdx, opts={}){ const s=curSources[srcIdx]; if(!s) return; let startTime=0; if(opts.startTime!==undefined){ startTime=opts.startTime; } else if(cur&&epIdx===cur.index){ startTime=captureTempProgress(s.source, s.id, epIdx); if(!startTime) startTime=readTempProgress(s.source, s.id, epIdx); } else if(resumeByEpisode[epIdx]&&resumeByEpisode[epIdx].play_time>10){ startTime=resumeByEpisode[epIdx].play_time; } if(epIdx>=(s.episodes||[]).length){ epIdx=(s.episodes||[]).length-1; startTime=0; } if(epIdx<0) return; endedHandled=false; cur={source:s.source, id:s.id, title:s.title, source_name:s.source_name, cover:s.poster, year:s.year, total:(s.episodes||[]).length, search_title:s.title, index:epIdx}; curSrcIdx=srcIdx; if(!triedSources.includes(s.source)) triedSources.push(s.source); const tabs=document.getElementById('srctabs'); tabs.innerHTML=''; curSources.forEach((x,i)=>{ const b=document.createElement('button'); b.textContent=`${x.source_name}（${(x.episodes||[]).length}集）${speedLabel(x)}`; if(i===srcIdx) b.className='on'; b.onclick=()=>{ triedSources=[]; playSrc(i,cur.index,{keepTime:true}); }; tabs.appendChild(b); }); const eps=document.getElementById('eps'); eps.innerHTML=''; document.getElementById('epsTitle').textContent=`选集（共 ${s.episodes.length} 集）`; s.episodes.forEach((url,i)=>{ const sp=document.createElement('span'); sp.className='ep'+(i===epIdx?' on':''); sp.textContent='第'+(i+1)+'集'; sp.onclick=()=>playSrc(srcIdx,i); eps.appendChild(sp); }); document.getElementById('ptitle').textContent=`${s.title} · ${s.source_name} · 第${epIdx+1}集 / 共${s.episodes.length}集`; const wasHidden=document.getElementById('playerSec').style.display==='none'; document.getElementById('playerSec').style.display='block'; document.getElementById('playSide').style.display=''; document.getElementById('sideExpandBtn').style.display='none'; if(wasHidden) showSideTab('eps'); window.scrollTo(0,0); playUrl(s.episodes[epIdx], false, startTime); }
+function openLivePlay(name, url){ if(curES){ curES.close(); curES=null; } showView('detail'); document.getElementById('detail').innerHTML=`<h2>直播 · ${name}</h2><p class="muted">离开本页播放即停止，返回直播页重新点频道。</p>`; document.getElementById('ptitle').textContent='直播 · '+name; document.getElementById('playerSec').style.display='block'; document.getElementById('playSide').style.display='none'; document.getElementById('sideExpandBtn').style.display='none'; window.scrollTo(0,0); playUrl(url, true); }
+function failover(){ if(!cur || !curSources.length) return false; const order=[...curSources].sort((a,b)=>{ const sa=curSpeed[a.source]?.speed_kbs||-1, sb=curSpeed[b.source]?.speed_kbs||-1; return sb-sa; }); for(const s of order){ if(!triedSources.includes(s.source)){ const idx=curSources.indexOf(s); const ep=Math.min(cur.index||0, (s.episodes||[]).length-1); if(ep>=0){ toast('当前源失败，已自动切换到：'+s.source_name+'（保持当前进度）'); playSrc(idx, ep, {keepTime:true}); return true; } } } return false; }
+function applyStartTime(v, startTime){ if(!startTime||startTime<=1) return; const seek=()=>{ if(v.duration&&startTime<v.duration-5){ v.currentTime=startTime; } }; v.addEventListener('loadedmetadata', seek, {once:true}); setTimeout(seek, 800); }
+function playUrl(rawUrl, isLive, startTime){ const v=document.getElementById('v'); const st=document.getElementById('pstatus'); st.textContent=startTime&&startTime>1?`正在加载…（从 ${Math.floor(startTime/60)}分${Math.floor(startTime%60)}秒继续）`:'正在加载…'; if(hls){ hls.destroy(); hls=null; } const url=isLive? rawUrl : '/api/proxy/m3u8?url='+encodeURIComponent(rawUrl); v.onerror=()=>{ if(!isLive && failover()) return; st.textContent='播放失败：所有源都打不开，点上方“播放源”手动换一个试试。'; toast('播放失败，所有源都试过了'); }; if(rawUrl.includes('.m3u8') && window.Hls && Hls.isSupported()){ hls=new Hls({enableWorker:true, maxBufferLength:30, maxMaxBufferLength:60}); hls.loadSource(url); hls.attachMedia(v); hls.on(Hls.Events.MANIFEST_PARSED, ()=>{ v.playbackRate=userSpeed; v.play().catch(()=>{}); st.textContent=''; applyStartTime(v, startTime); }); hls.on(Hls.Events.ERROR, (e,d)=>{ if(d.fatal){ if(!isLive && failover()) return; st.textContent='播放失败：'+(d.details||'')+'，所有源都试过了。'; } }); } else { v.src=url; v.playbackRate=userSpeed; applyStartTime(v, startTime); v.play().catch(()=>{ if(!isLive && failover()) return; st.textContent='播放失败：浏览器无法直接播这个地址。'; }); } v.ontimeupdate=()=>{ if(!isLive && cur && v.currentTime>5){ if(!v._lastSave || v.currentTime-v._lastSave>15){ v._lastSave=v.currentTime; saveRecord(); } } }; v.onpause=()=>{ if(!isLive) saveRecord(); }; v.onended=()=>{ if(isLive||!cur||endedHandled) return; const s=curSources[curSrcIdx]; if(s&&cur.index+1<s.episodes.length){ endedHandled=true; toast('本集播完，1 秒后自动播下一集'); setTimeout(()=>playSrc(curSrcIdx, cur.index+1), 1000); } }; }
+async function saveRecord(){ if(!cur) return; const v=document.getElementById('v'); // LunaTV 同款：离结尾不到 3 分钟不保存，避免“继续观看”从片尾开始
+  if(v.duration&&v.duration-v.currentTime<180) return; const key=cur.source+'+'+cur.id; await fetch('/api/playrecords',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key, record:{title:cur.title, source_name:cur.source_name, cover:cur.cover, year:cur.year, index:cur.index||0, total_episodes:cur.total, play_time:Math.floor(v.currentTime), total_time:Math.floor(v.duration||0), save_time:Date.now(), search_title:cur.search_title}})}); }
+function nextEp(){ if(!cur) return; const s=curSources[curSrcIdx]; if(cur.index+1 < s.episodes.length) playSrc(curSrcIdx, cur.index+1); else toast('已经是最后一集'); }
+async function favCurrent(){ if(!cur) return; try{ await api('/api/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:cur.source+'+'+cur.id, favorite:{title:cur.title, source_name:cur.source_name, cover:cur.cover, year:cur.year, total_episodes:cur.total, save_time:Date.now(), origin:''}})}); document.getElementById('favmsg').textContent='已收藏'; toast('已收藏'); }catch(e){ toast(e.message); } }
+async function deleteContinueRecord(key){ try{ await api('/api/playrecords?key='+encodeURIComponent(key),{method:'DELETE'}); loadContinueInto('favContinue'); loadContinueInto('continueGrid'); toast('已清除该条观看记录'); }catch(e){ toast(e.message); } }
+async function clearContinueRecords(){ if(!confirm('确定清空全部观看记录吗？所有进度将丢失，此操作不可恢复。')) return; try{ await api('/api/playrecords',{method:'DELETE'}); loadContinueInto('favContinue'); loadContinueInto('continueGrid'); toast('观看记录已清空'); }catch(e){ toast(e.message); } }
+async function loadContinueInto(elId){ try{ const d=await api('/api/playrecords'); const el=document.getElementById(elId); el.innerHTML=''; const keys=Object.keys(d); if(!keys.length) el.innerHTML='<span class="muted">暂无继续观看</span>'; keys.forEach(key=>{ const rec=d[key]; const [source,id]=key.split('+'); const epNo=String((rec.index||0)+1).padStart(2,'0'); const del=`<div><button class="wantbtn" onclick="event.stopPropagation();deleteContinueRecord('${key.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">✕ 清除记录</button></div>`; el.appendChild(card({title:rec.title, cover:rec.cover, year:rec.year, sourceChip:rec.source_name, epBadge:rec.total_episodes?`<b>EP ${epNo}</b> / ${rec.total_episodes}`:`第${(rec.index||0)+1}集`, progress:rec.total_time>0?rec.play_time/rec.total_time:0}, ()=>openTitle(rec.search_title||rec.title), del)); }); }catch(e){} }
+async function deleteFavorite(key){ try{ await api('/api/favorites?key='+encodeURIComponent(key),{method:'DELETE'}); loadFav(); toast('已取消收藏'); }catch(e){ toast(e.message); } }
+async function loadFav(){ try{ const d=await api('/api/favorites'); const el=document.getElementById('favGrid'); el.innerHTML=''; const keys=Object.keys(d); if(!keys.length) el.innerHTML='<span class="muted">暂无收藏</span>'; keys.forEach(key=>{ const rec=d[key]; const del=`<div><button class="wantbtn" onclick="event.stopPropagation();deleteFavorite('${key.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">✕ 取消收藏</button></div>`; el.appendChild(card(rec, ()=>openTitle(rec.title), del)); }); }catch(e){ toast(e.message); } }
+async function loadLive(){ try{ const d=await api('/api/live/sources'); const el=document.getElementById('liveGroups'); el.innerHTML=''; if(!d.data.length){ el.innerHTML='<span class="muted">还没有直播源，去设置里加一个 M3U 地址。</span>'; return; } d.data.forEach(s=>{ const b=document.createElement('button'); b.textContent=s.name; b.onclick=()=>loadChannels(s.key, s.name); el.appendChild(b); }); }catch(e){ toast(e.message); } }
+async function loadChannels(key, name, fresh){ try{ toast('正在解析直播频道：'+name+'…'); const d=await api('/api/live/channels?source='+encodeURIComponent(key)+(fresh?'&fresh=1':'')); const el=document.getElementById('liveChannels'); el.innerHTML=`<h3>${name}（共 ${d.total} 个频道）</h3><button onclick="loadChannels('${key}','${name}',true)">刷新频道（绕过 6 小时缓存）</button><p class="muted">频道按分组折叠，点组名展开，点频道进播放页。</p>`; (d.order||[]).forEach(g=>{ const det=document.createElement('details'); det.innerHTML=`<summary>${g}（${(d.groups[g]||[]).length} 个频道）</summary>`; const div=document.createElement('div'); (d.groups[g]||[]).forEach(ch=>{ const sp=document.createElement('span'); sp.className='ep'; sp.textContent=ch.name; sp.onclick=()=>openLivePlay(ch.name, ch.url); div.appendChild(sp); }); det.appendChild(div); el.appendChild(det); }); }catch(e){ toast('直播解析失败：'+e.message); } }
+async function loadSettings(){ try{ const srcs=await api('/api/sources'); document.getElementById('srcSummary').textContent=`（${srcs.length} 个，${srcs.filter(s=>s.disabled).length} 个禁用）`; const t=document.getElementById('srcTable'); t.innerHTML='<tr><th>key</th><th>名称</th><th>api</th><th>状态</th><th>操作</th></tr>'; srcs.forEach(s=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.key}</td><td>${s.name}</td><td style="word-break:break-all">${s.api}</td><td>${s.disabled?'已禁用':'启用'}</td><td><button onclick="testSource('${s.key}')">测速</button> <button onclick="toggleSource('${s.key}','${s.name}','${s.api}',${!s.disabled})">${s.disabled?'启用':'禁用'}</button> <button onclick="delSource('${s.key}')">删除</button> <span id="test-${s.key}" class="muted"></span></td>`; t.appendChild(tr); }); const live=await api('/api/live/sources'); document.getElementById('liveSummary').textContent=`（${(live.data||[]).length} 个）`; const lt=document.getElementById('liveTable'); lt.innerHTML='<tr><th>key</th><th>名称</th><th>url</th><th>操作</th></tr>'; (live.data||[]).forEach(s=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.key}</td><td>${s.name}</td><td style="word-break:break-all">${s.url}</td><td><button onclick="delLive('${s.key}')">删除</button></td>`; lt.appendChild(tr); }); }catch(e){ toast(e.message); } }
+async function loadSyncConfig(){ try{ const d=await api('/api/sync-config'); document.getElementById('syncPages').value=d.config.pages||10; document.getElementById('syncAuto').checked=!!d.config.auto; document.getElementById('syncInterval').value=String(d.config.interval_hours||24); document.getElementById('syncDailyTime').value=d.config.daily_time||''; document.getElementById('syncSummary').textContent=`（${d.catalog_count} 条${d.running?'，同步进行中':''}）`; document.getElementById('syncMsg').textContent=d.last_sync?('上次同步：'+new Date(d.last_sync*1000).toLocaleString()):'还没同步过'; const srcs=await api('/api/sources'); const sel=new Set(d.config.sources||[]); const allChecked=!d.config.sources||!d.config.sources.length; const el=document.getElementById('syncSources'); el.innerHTML=''; srcs.filter(s=>!s.disabled).forEach(s=>{ const lab=document.createElement('label'); lab.style.marginRight='14px'; lab.innerHTML=`<input type="checkbox" value="${s.key}" ${allChecked||sel.has(s.key)?'checked':''}> ${s.name}`; el.appendChild(lab); }); }catch(e){} }
+function syncSelectAll(on){ document.querySelectorAll('#syncSources input').forEach(c=>c.checked=on); }
+async function saveSyncConfig(){ const keys=[...document.querySelectorAll('#syncSources input:checked')].map(c=>c.value); try{ await api('/api/sync-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pages:parseInt(document.getElementById('syncPages').value)||10, sources:keys, auto:document.getElementById('syncAuto').checked, interval_hours:parseInt(document.getElementById('syncInterval').value)||24, daily_time:document.getElementById('syncDailyTime').value||''})}); toast('同步设置已保存'); loadSyncConfig(); }catch(e){ toast(e.message); } }
+async function triggerSync(){ try{ await api('/api/catalog/sync',{method:'POST'}); toast('同步已开始，后台跑，货架会慢慢变厚'); loadSyncConfig(); }catch(e){ toast(e.message); } }
+async function addSource(){ try{ const key=document.getElementById('skey').value, name=document.getElementById('sname').value, api2=document.getElementById('sapi').value; if(!key||!api2) return toast('key 和 api 不能为空'); await api('/api/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key, name:name||key, api:api2})}); toast('源已保存'); loadSettings(); }catch(e){ toast(e.message); } }
+async function delSource(k){ try{ await api('/api/sources?key='+encodeURIComponent(k),{method:'DELETE'}); toast('已删除'); loadSettings(); }catch(e){ toast(e.message); } }
+async function toggleSource(k,n,a,dis){ try{ await api('/api/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k, name:n, api:a, disabled:dis})}); loadSettings(); }catch(e){ toast(e.message); } }
+async function testSource(k){ try{ const d=await api('/api/source/test?key='+encodeURIComponent(k)); document.getElementById('test-'+k).textContent=d.ok?`可用，分类 ${d.categories} 个，${d.ms}ms`:`不可用：${d.category_error||d.search_error}`; }catch(e){ toast(e.message); } }
+async function addLive(){ try{ const key=document.getElementById('lkey').value, name=document.getElementById('lname').value, url=document.getElementById('lurl').value; if(!key||!url) return toast('key 和 M3U 地址不能为空'); await api('/api/live/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key, name:name||key, url})}); toast('直播源已保存'); loadSettings(); }catch(e){ toast(e.message); } }
+async function delLive(k){ try{ await api('/api/live/sources?key='+encodeURIComponent(k),{method:'DELETE'}); toast('已删除'); loadSettings(); }catch(e){ toast(e.message); } }
+async function subscribeSources(){ try{ const url=document.getElementById('subUrl').value; if(!url) return toast('先填订阅地址'); const d=await api('/api/sources/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}); document.getElementById('subMsg').textContent=`导入 ${d.imported} / ${d.total} 个源`; toast('订阅导入完成'); loadSettings(); }catch(e){ toast('订阅导入失败：'+e.message); } }
+async function subscribeLive(){ try{ const url=document.getElementById('liveSubUrl').value, name=document.getElementById('liveSubName').value; if(!url) return toast('先填直播订阅地址'); const d=await api('/api/live/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url, name})}); document.getElementById('liveSubMsg').textContent=`导入 ${d.imported} 个，格式 ${d.format}`; toast('直播订阅导入完成'); loadSettings(); }catch(e){ toast('直播订阅导入失败：'+e.message); } }
+async function loadUsers(){ try{ const d=await api('/api/users'); const t=document.getElementById('userTable'); t.innerHTML='<tr><th>用户名</th><th>角色</th><th>操作</th></tr>'; d.forEach(u=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${u.username}</td><td>${u.role}</td><td><button onclick="delUser('${u.username}')">删除</button></td>`; t.appendChild(tr); }); }catch(e){ document.getElementById('userTable').innerHTML='<tr><td class="muted">只有站长能看账户列表：'+e.message+'</td></tr>'; } }
+async function addUser(){ try{ const username=document.getElementById('nu').value, password=document.getElementById('np').value, role=document.getElementById('nrole').value; await api('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username, password, role})}); toast('账户已添加'); loadUsers(); }catch(e){ toast('添加账户失败：'+e.message); } }
+async function delUser(u){ try{ await api('/api/users?username='+encodeURIComponent(u),{method:'DELETE'}); toast('已删除'); loadUsers(); }catch(e){ toast(e.message); } }
+async function changePw(){ try{ const old=document.getElementById('oldp').value, nw=document.getElementById('newp').value; await api('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old, new:nw})}); toast('密码已改'); }catch(e){ toast('改密码失败：'+e.message); } }
+async function loadUserSettings(){ try{ const d=await api('/api/user-settings'); if(d.speed) document.getElementById('setSpeed').value=d.speed; document.getElementById('setSkip').checked=d.skip==='1'; if(d.image_proxy) document.getElementById('setImg').value=d.image_proxy; const setChk=(id,k)=>{ const el=document.getElementById(id); if(el) el.checked=d[k]===undefined||d[k]==='1'; }; setChk('chkHomeContinue','home_continue'); setChk('chkHomeHotMovies','home_hotmovies'); setChk('chkHomeHotTv','home_hottv'); setChk('chkHomeAnime','home_anime'); setChk('chkHomeVariety','home_variety'); setChk('chkHomeShort','home_short'); setChk('chkHomeUpcoming','home_upcoming'); }catch(e){} }
+async function saveUserSettings(){ try{ await api('/api/user-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:document.getElementById('setSpeed').value, skip:document.getElementById('setSkip').checked?'1':'0', image_proxy:document.getElementById('setImg').value})}); toast('播放设置已保存到服务端'); }catch(e){ toast(e.message); } }
+async function clearCache(){ try{ await api('/api/cache/clear',{method:'POST'}); toast('服务端缓存已清空'); }catch(e){ toast(e.message); } }
+let lastFailedKeys=[];
+async function testAllSources(){ try{ document.getElementById('testAllMsg').textContent='正在并行测试全部源…'; const d=await api('/api/sources/test-all',{method:'POST'}); lastFailedKeys=d.results.filter(r=>!r.ok).map(r=>r.key); const el=document.getElementById('testAllTable'); let html='<table><tr><th>源</th><th>结果</th><th>耗时</th><th>分类数</th><th>错误</th></tr>'; d.results.forEach(r=>{ html+=`<tr><td>${r.name}（${r.key}）</td><td>${r.ok?'✅ 可用':'❌ 失败'}</td><td>${r.ms}ms</td><td>${r.categories}</td><td>${r.error||''}</td></tr>`; }); html+='</table>'; el.innerHTML=html; document.getElementById('testAllMsg').textContent=`测完：${d.results.filter(r=>r.ok).length} 可用，${lastFailedKeys.length} 失败。失败不一定是源死了，也可能是当时网络抖一下，点“禁用失败源”前可以再测一次。`; }catch(e){ toast('测试全部源失败：'+e.message); } }
+async function dedupeSources(){ try{ const d=await api('/api/sources/dedupe',{method:'POST'}); toast(`去重完成，删了 ${d.count} 个重复源`); loadSettings(); }catch(e){ toast(e.message); } }
+async function disableFailedSources(){ if(!lastFailedKeys.length) return toast('先点“一键测试全部源”，再禁用失败的'); try{ const d=await api('/api/sources/disable-failed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keys:lastFailedKeys})}); toast(`已禁用 ${d.disabled} 个失败源`); loadSettings(); }catch(e){ toast(e.message); } }
+/* v1.4 即将上映 + 想看：LunaTV 式 reminders，提醒只算已上映且还没进播放记录的 */
+let upcomingItems=[], upcomingFilterVal='all', wantTitles=new Set();
+function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function releaseLabel(date){ if(!date) return '无上映日期'; const t=todayStr(); if(date===t) return '今日上映'; if(date<t){ const days=Math.floor((new Date(t)-new Date(date))/86400000); return '已上映'+days+'天'; } return date+'上映'; }
+async function loadUpcoming(){ try{ let showUpcoming=true; try{ const cfg=await api('/api/user-settings'); if(cfg.home_upcoming==='0') showUpcoming=false; }catch(e){} if(!showUpcoming){ document.getElementById('upcomingSec').style.display='none'; return; } const d=await api('/api/upcoming'); upcomingItems=d.items||[]; document.getElementById('upcomingSec').style.display=d.source==='off'?'none':''; document.getElementById('upcomingMsg').textContent=d.last_sync?('上次同步：'+new Date(d.last_sync*1000).toLocaleString()+(d.refreshing?'，正在后台刷新…':'')):'还没同步过，正在后台拉…'; renderUpcoming(); }catch(e){ document.getElementById('upcomingRow').innerHTML='<span class="muted">上映数据拉取失败：'+e.message+'</span>'; } }
+function upcomingFilter(v, btn){ upcomingFilterVal=v; document.querySelectorAll('#upcomingSec .rowhead button').forEach(b=>b.classList.remove('on')); if(btn) btn.classList.add('on'); renderUpcoming(); }
+async function renderUpcoming(){ const el=document.getElementById('upcomingRow'); el.innerHTML=''; let wants=[]; try{ wants=(await api('/api/wants')).items||[]; }catch(e){} wantTitles=new Set(wants.map(w=>w.title)); const list=upcomingItems.filter(it=>upcomingFilterVal==='all'||it.type===upcomingFilterVal); if(!list.length){ el.innerHTML='<span class="muted">这个分类暂无上映数据（可能是源站还没排片，或去设置里点“立即刷新”）</span>'; return; } list.forEach(it=>{ const div=document.createElement('div'); div.className='card'; const wanted=wantTitles.has(it.title); div.innerHTML=`<span class="epbadge">${releaseLabel(it.release_date)}</span><img src="${posterUrl(it.cover)}" onerror="this.style.display='none'"><div><b>${it.title}</b><div><small>${it.type||''} ${it.genre||''} ${it.region||''}</small></div><button class="wantbtn" onclick="event.stopPropagation();toggleWantFromUpcoming(this,'${it.title.replace(/'/g,"\\'")}','${(it.cover||'').replace(/'/g,"")}','${(it.release_date||'').slice(0,4)}','${it.release_date||''}')">${wanted?'✓ 已想看（点取消）':'🔔 想看'}</button></div>`; el.appendChild(div); }); }
+async function refreshUpcoming(manual){ try{ if(manual){ await api('/api/upcoming',{method:'POST'}); toast('上映数据正在后台刷新，稍后刷新页面看'); } loadUpcoming(); }catch(e){ toast(e.message); } }
+async function loadUpcomingConfig(){ try{ const d=await api('/api/upcoming-config'); document.getElementById('upSource').value=d.source||'manmankan'; document.getElementById('tmdbKey').placeholder=d.has_tmdb_key?'已保存 key（留空不改）':'TMDB API key（选 TMDB 时填）'; }catch(e){} }
+async function saveUpcomingConfig(){ try{ const key=document.getElementById('tmdbKey').value; const body={source:document.getElementById('upSource').value}; if(key) body.tmdb_key=key; await api('/api/upcoming-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('upCfgMsg').textContent='已保存'; toast('上映数据源已保存'); loadUpcoming(); }catch(e){ toast(e.message); } }
+async function refreshWantBtn(title){ const b=document.getElementById('wantBtn'); if(!b) return; try{ const d=await api('/api/wants'); b.textContent=(d.items||[]).some(w=>w.title===title)?'✓ 已想看（点取消）':'🔔 想看'; }catch(e){} }
+async function toggleWantDetail(){ if(!curSources.length) return; const s=curSources[0]; try{ const d=await api('/api/wants'); const ex=(d.items||[]).find(w=>w.title===s.title); if(ex){ await api('/api/wants?title='+encodeURIComponent(s.title),{method:'DELETE'}); toast('已取消想看'); } else { await api('/api/wants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:s.title, cover:s.poster||'', year:s.year||'', source_name:s.source_name||'', release_date:''})}); toast('已加入想看'); } refreshWantBtn(s.title); loadWantBadge(); }catch(e){ toast(e.message); } }
+async function toggleWantFromUpcoming(btn, title, cover, year, date){ try{ const d=await api('/api/wants'); const ex=(d.items||[]).find(w=>w.title===title); if(ex){ await api('/api/wants?title='+encodeURIComponent(title),{method:'DELETE'}); btn.textContent='🔔 想看'; toast('已取消想看'); } else { await api('/api/wants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title, cover, year, source_name:'', release_date:date})}); btn.textContent='✓ 已想看（点取消）'; toast('已加入想看'); } loadWantBadge(); }catch(e){ toast(e.message); } }
+async function loadWants(){ try{ const d=await api('/api/wants'); const recs=await api('/api/playrecords').catch(()=>({})); const watched=new Set(); Object.values(recs||{}).forEach(r=>{ if(r.title) watched.add(r.title); if(r.search_title) watched.add(r.search_title); }); const el=document.getElementById('wantGrid'); el.innerHTML=''; const items=d.items||[]; document.getElementById('wantEmpty').textContent=items.length?'':'暂无想看内容：首页“即将上映”卡片点 🔔，或详情页点“想看”，就能加进来。'; items.forEach(w=>{ const div=document.createElement('div'); div.className='card'; const isW=watched.has(w.title); div.innerHTML=`<span class="epbadge">${isW?'已看 ✓':releaseLabel(w.release_date)}</span><img src="${posterUrl(w.cover)}" onerror="this.style.display='none'"><div><b>${w.title}</b><div><small>${w.year||''} ${w.release_date||''}</small></div><button class="wantbtn" onclick="event.stopPropagation();openTitle('${w.title.replace(/'/g,"\\'")}')">去看 ▸</button><button class="wantbtn" onclick="event.stopPropagation();deleteWant('${w.title.replace(/'/g,"\\'")}')">取消想看</button></div>`; el.appendChild(div); }); }catch(e){ toast(e.message); } }
+async function deleteWant(title){ try{ await api('/api/wants?title='+encodeURIComponent(title),{method:'DELETE'}); loadWants(); loadWantBadge(); }catch(e){ toast(e.message); } }
+async function clearWants(){ try{ const d=await api('/api/wants'); for(const w of (d.items||[])){ await api('/api/wants?title='+encodeURIComponent(w.title),{method:'DELETE'}); } loadWants(); loadWantBadge(); toast('想看已清空'); }catch(e){ toast(e.message); } }
+async function loadWantBadge(){ try{ const d=await api('/api/wants'); const recs=await api('/api/playrecords').catch(()=>({})); const watched=new Set(); Object.values(recs||{}).forEach(r=>{ if(r.title) watched.add(r.title); if(r.search_title) watched.add(r.search_title); }); const t=todayStr(); const n=(d.items||[]).filter(w=>w.release_date && w.release_date<=t && !watched.has(w.title)).length; const btn=document.querySelector('header nav button[data-view="fav"]'); if(btn) btn.innerHTML=n>0?'👤 我的 <span class="navdot">'+n+'</span>':'👤 我的'; }catch(e){} }
+/* v1.5 整页上映日程：照 LunaTV /release-calendar 的逻辑——一次拉全量、前端筛类型/地区/题材/时间段/关键词，时间线按日期分组、网格分页不做（77 条全列） */
+let upViewMode='timeline';
+function setUpView(m, btn){ upViewMode=m; document.getElementById('upViewTimeline').classList.toggle('on', m==='timeline'); document.getElementById('upViewGrid').classList.toggle('on', m==='grid'); renderUpcomingPage(); }
+async function loadUpcomingPage(){ try{ const d=await api('/api/upcoming'); upcomingItems=d.items||[]; try{ wantTitles=new Set(((await api('/api/wants')).items||[]).map(w=>w.title)); }catch(e){} const regs=new Set(), gens=new Set(); upcomingItems.forEach(it=>{ if(it.region) regs.add(it.region); (it.genre||'').split('/').forEach(g=>{ if(g) gens.add(g); }); }); const rs=document.getElementById('upFRegion'), gs=document.getElementById('upFGenre'); const curR=rs.value, curG=gs.value; rs.innerHTML='<option value="all">全部</option>'; [...regs].sort().forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; rs.appendChild(o); }); gs.innerHTML='<option value="all">全部</option>'; [...gens].sort().forEach(g=>{ const o=document.createElement('option'); o.value=g; o.textContent=g; gs.appendChild(o); }); if([...regs].includes(curR)) rs.value=curR; if([...gens].includes(curG)) gs.value=curG; renderUpcomingPage(); }catch(e){ document.getElementById('upPageMsg').textContent='上映数据拉取失败：'+e.message; } }
+function upPageFiltered(){ const t=todayStr(); const type=document.getElementById('upFType').value, period=document.getElementById('upFPeriod').value, region=document.getElementById('upFRegion').value, genre=document.getElementById('upFGenre').value, q=(document.getElementById('upFSearch').value||'').trim().toLowerCase(); return upcomingItems.filter(it=>{ if(type!=='all'&&it.type!==type) return false; if(period==='past'&&!(it.release_date<t&&it.release_date>=addDays(t,-7))) return false; if(period==='today'&&it.release_date!==t) return false; if(period==='7'&&!(it.release_date>t&&it.release_date<=addDays(t,7))) return false; if(period==='30'&&!(it.release_date>t&&it.release_date<=addDays(t,30))) return false; if(period==='90'&&!(it.release_date>t&&it.release_date<=addDays(t,90))) return false; if(region!=='all'&&!(it.region||'').includes(region)) return false; if(genre!=='all'&&!(it.genre||'').split('/').includes(genre)) return false; if(q&&!((it.title+' '+(it.director||'')+' '+(it.actors||'')).toLowerCase().includes(q))) return false; return true; }).sort((a,b)=>a.release_date.localeCompare(b.release_date)||a.title.localeCompare(b.title)); }
+function addDays(ds, n){ const d=new Date(ds); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function upCard(it){ const div=document.createElement('div'); div.className='card'; const wanted=wantTitles.has(it.title); const released=it.release_date<=todayStr(); div.innerHTML=`<span class="epbadge">${releaseLabel(it.release_date)}</span><img loading="lazy" src="${posterUrl(it.cover)}" onerror="this.style.display='none'"><div><b>${it.title}</b><div><small>${it.type||''} ${it.genre||''} ${it.region||''}</small></div><div><small>${it.director?('导演：'+it.director):''}</small></div><div><small>${it.actors?('主演：'+it.actors):''}</small></div><button class="wantbtn" onclick="event.stopPropagation();toggleWantFromUpcoming(this,'${it.title.replace(/'/g,"\\'")}','${(it.cover||'').replace(/'/g,"")}','${(it.release_date||'').slice(0,4)}','${it.release_date||''}')">${wanted?'✓ 已想看（点取消）':'🔔 想看'}</button></div>`; div.onclick=()=>{ if(released) openTitle(it.title); else toast('还没上映，先点 🔔 加入想看，上映后红点会提醒你'); }; return div; }
+function renderUpcomingPage(){ const list=upPageFiltered(); document.getElementById('upPageCount').textContent='共 '+list.length+' 部'; const tl=document.getElementById('upTimeline'), gr=document.getElementById('upGrid'); tl.style.display=upViewMode==='timeline'?'':'none'; gr.style.display=upViewMode==='grid'?'':'none'; tl.innerHTML=''; gr.innerHTML=''; if(!list.length){ document.getElementById('upPageMsg').textContent='没有符合条件的上映数据，换个筛选试试，或去设置里点“立即刷新”。'; return; } document.getElementById('upPageMsg').textContent=''; if(upViewMode==='grid'){ list.forEach(it=>gr.appendChild(upCard(it))); return; } const groups={}; list.forEach(it=>{ (groups[it.release_date]=groups[it.release_date]||[]).push(it); }); Object.keys(groups).sort().forEach(date=>{ const h=document.createElement('h3'); const t=todayStr(); let tag=''; if(date===t) tag=' 🔥 今日上映'; else if(date<t) tag=' ✅ 已上映'+Math.floor((new Date(t)-new Date(date))/86400000)+'天'; else tag=' ⏰ 还有'+Math.floor((new Date(date)-new Date(t))/86400000)+'天'; h.textContent=date+'（'+groups[date].length+' 部）'+tag; tl.appendChild(h); const row=document.createElement('div'); row.className='row'; groups[date].forEach(it=>row.appendChild(upCard(it))); tl.appendChild(row); }); }
+async function loadImageProxies(){ try{ const d=await api('/api/image-proxies'); document.getElementById('imgProxies').value=(d.proxies||[]).join('\n'); }catch(e){} }
+async function saveImageProxies(){ try{ const list=document.getElementById('imgProxies').value.split('\n').map(s=>s.trim()).filter(Boolean); const d=await api('/api/image-proxies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({proxies:list})}); document.getElementById('imgProxyMsg').textContent='已保存 '+((d.proxies||[]).length)+' 个代理'; }catch(e){ document.getElementById('imgProxyMsg').textContent='保存失败：'+e.message; } }
+function allOption(){ const o=document.createElement('option'); o.value=''; o.label='全部'; return o; }
+// datalist 的坑：下拉选项会按当前输入值过滤，选过一次后，再点下拉就只剩已选的那一项、改不了。
+// 修法：点进输入框时先把值暂存并清空（下拉就显示全部选项），选了新的就提交，没选就失焦还原。
+function bindDatalist(input){
+  let committed=input.value, changed=false;
+  input.addEventListener('focus', ()=>{ committed=input.value; changed=false; input.value=''; });
+  input.addEventListener('change', ()=>{ committed=input.value; changed=true; });
+  input.addEventListener('blur', ()=>{ if(!changed) input.value=committed; });
+}
+
+let shelfMetaSeq=0;
+async function loadShelfMeta(type){
+  const seq=++shelfMetaSeq;
+  try{ const y=document.getElementById('yearList'); y.innerHTML=''; y.appendChild(allOption()); const now=new Date().getFullYear(); for(let i=0;i<6;i++){ const o=document.createElement('option'); o.value=String(now-i); y.appendChild(o); } }catch(e){}
+  // 关键：切分类时先同步清空旧选项（不等网络回来），否则在新选项回来前的空档里点开下拉，
+  // 看到的还是上个分类的选项，选了一个就粘在输入框里，之后新选项回来也不会清掉它。
+  const g=document.getElementById('genreList'); if(g){ g.innerHTML=''; g.appendChild(allOption()); }
+  const rg=document.getElementById('regionList'); if(rg){ rg.innerHTML=''; rg.appendChild(allOption()); }
+  try{ const d=await api('/api/catalog/meta'+(type?`?type=${encodeURIComponent(type)}`:'')); if(seq!==shelfMetaSeq) return;
+    (d.genres||[]).forEach(v=>{ const o=document.createElement('option'); o.value=v; g.appendChild(o); });
+    (d.regions||[]).forEach(v=>{ const o=document.createElement('option'); o.value=v; rg.appendChild(o); });
+  }catch(e){}
+}
+updateGreeting(); loadUserSpeed(); ['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{}); loadHome().catch(()=>{}); loadContinueInto('continueGrid').catch(()=>{}); loadUpcoming().catch(()=>{}); loadWantBadge().catch(()=>{});
+</script>
+</body></html>
