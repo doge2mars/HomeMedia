@@ -8,3 +8,4 @@ home-media.*
 *.old2
 *.old3
 *.tgz
+.env

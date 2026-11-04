@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -81,14 +82,14 @@ func cmsGet(api, query string) (map[string]any, error) {
 }
 
 type SearchItem struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Poster   string   `json:"poster"`
-	Year     string   `json:"year"`
-	TypeName string   `json:"type_name"`
-	Source   string   `json:"source"`
-	SourceName string `json:"source_name"`
-	Episodes []string `json:"episodes,omitempty"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Poster     string   `json:"poster"`
+	Year       string   `json:"year"`
+	TypeName   string   `json:"type_name"`
+	Source     string   `json:"source"`
+	SourceName string   `json:"source_name"`
+	Episodes   []string `json:"episodes,omitempty"`
 }
 
 func parseVodList(d map[string]any) []map[string]any {
@@ -264,7 +265,7 @@ func handleDetail(w http.ResponseWriter, r *http.Request) {
 		"id": id, "title": sField(m, "vod_name", "title"), "poster": sField(m, "vod_pic", "pic"),
 		"year": sField(m, "vod_year", "year"), "type_name": sField(m, "type_name"),
 		"content": sField(m, "vod_content", "vod_blurb"), "source": sourceKey, "source_name": sname,
-		"episodes": parsePlayURLs(sField(m, "vod_play_url")),
+		"episodes":  parsePlayURLs(sField(m, "vod_play_url")),
 		"play_from": sField(m, "vod_play_from"),
 	})
 }
@@ -607,6 +608,11 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	// 上游非 2xx（404/403/5xx）不要当成播放列表返回，否则播放器拿到一份“空列表”也不会触发换源
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeJSON(w, 502, map[string]string{"error": fmt.Sprintf("upstream status %d", resp.StatusCode)})
+		return
+	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "mpegurl") || strings.Contains(raw, ".m3u8") {
@@ -666,6 +672,114 @@ func pruneSegmentCache() {
 	}
 }
 
+// ---- 分片代理（稳定性加固）----
+// 1) 只有“上游 200 + 完整读完 + 不是错误页”的分片才落盘，否则回 502，让播放器换源/重试；
+//    之前 403/404 错误页、读到一半被截断的分片都会被缓存，之后同一分片永远命中坏文件。
+// 2) 落盘先写临时文件再 rename，别的请求不会读到写了一半的文件。
+// 3) 同一分片的并发请求合并成一次上游下载（多设备同看/播放器预加载）。
+// 4) 分片整体超时放宽到 60s（共用的 httpClient 是 15s，慢 CDN 的大分片会被截断）。
+// 5) 命中时刷新 mtime，使淘汰真正按“最近使用”而不是“最早写入”；淘汰任务同一时刻只跑一个。
+
+const maxSegmentBytes = 50 << 20
+
+var segClient = &http.Client{Timeout: 60 * time.Second}
+
+type segCall struct {
+	done chan struct{}
+	body []byte
+	ct   string
+	err  error
+}
+
+var segInflight sync.Map // cachePath -> *segCall
+
+// looksLikeErrorPage：上游常用 200 + HTML/JSON 返回“防盗链/限流”页面，真分片（TS/fMP4/密文）不会以这些开头。
+func looksLikeErrorPage(b []byte) bool {
+	if len(b) == 0 {
+		return true
+	}
+	head := b
+	if len(head) > 64 {
+		head = head[:64]
+	}
+	s := strings.ToLower(strings.TrimLeft(string(head), " \t\r\n\xef\xbb\xbf"))
+	return strings.HasPrefix(s, "<!doctype") || strings.HasPrefix(s, "<html") || strings.HasPrefix(s, "{\"")
+}
+
+func downloadSegment(raw, cachePath string) ([]byte, string, error) {
+	req, _ := http.NewRequest("GET", raw, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
+	resp, err := segClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("upstream status %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(strings.ToLower(ct), "text/html") {
+		return nil, "", fmt.Errorf("upstream returned html, not a segment")
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSegmentBytes+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("read segment: %w", err)
+	}
+	if len(body) > maxSegmentBytes {
+		return nil, "", fmt.Errorf("segment larger than %d bytes", maxSegmentBytes)
+	}
+	if resp.ContentLength >= 0 && int64(len(body)) != resp.ContentLength {
+		return nil, "", fmt.Errorf("truncated segment: got %d of %d bytes", len(body), resp.ContentLength)
+	}
+	if looksLikeErrorPage(body) {
+		return nil, "", fmt.Errorf("upstream returned an error page, not a segment")
+	}
+	dir := filepath.Dir(cachePath)
+	if err := os.MkdirAll(dir, 0o755); err == nil {
+		if tmp, err := os.CreateTemp(dir, "seg-*.tmp"); err == nil {
+			_, werr := tmp.Write(body)
+			cerr := tmp.Close()
+			if werr == nil && cerr == nil {
+				_ = os.Chmod(tmp.Name(), 0o644)
+				if os.Rename(tmp.Name(), cachePath) != nil {
+					_ = os.Remove(tmp.Name())
+				}
+			} else {
+				_ = os.Remove(tmp.Name())
+			}
+		}
+	}
+	return body, ct, nil
+}
+
+// fetchSegment：同一 cachePath 同时只有一个下载，其余请求等它的结果。
+func fetchSegment(raw, cachePath string) ([]byte, string, error) {
+	c := &segCall{done: make(chan struct{}), err: fmt.Errorf("segment fetch aborted")}
+	if v, loaded := segInflight.LoadOrStore(cachePath, c); loaded {
+		other := v.(*segCall)
+		<-other.done
+		return other.body, other.ct, other.err
+	}
+	defer func() {
+		close(c.done)
+		segInflight.Delete(cachePath)
+	}()
+	c.body, c.ct, c.err = downloadSegment(raw, cachePath)
+	return c.body, c.ct, c.err
+}
+
+var pruneRunning int32
+
+func pruneSegmentCacheAsync() {
+	if !atomic.CompareAndSwapInt32(&pruneRunning, 0, 1) {
+		return
+	}
+	go func() {
+		defer atomic.StoreInt32(&pruneRunning, 0)
+		pruneSegmentCache()
+	}()
+}
+
 func handleProxySegment(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
@@ -674,25 +788,31 @@ func handleProxySegment(w http.ResponseWriter, r *http.Request) {
 	}
 	cachePath := segmentCachePath(raw)
 	if b, err := os.ReadFile(cachePath); err == nil {
-		w.Header().Set("Content-Type", "video/mp2t")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("X-Cache", "hit")
-		_, _ = w.Write(b)
-		return
+		if looksLikeErrorPage(b) {
+			// 旧版本留下的坏缓存：删掉，当作未命中重新拉
+			_ = os.Remove(cachePath)
+		} else {
+			now := time.Now()
+			_ = os.Chtimes(cachePath, now, now)
+			w.Header().Set("Content-Type", "video/mp2t")
+			w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("X-Cache", "hit")
+			_, _ = w.Write(b)
+			return
+		}
 	}
-	req, _ := http.NewRequest("GET", raw, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
-	resp, err := httpClient.Do(req)
+	body, ct, err := fetchSegment(raw, cachePath)
 	if err != nil {
 		writeJSON(w, 502, map[string]string{"error": err.Error()})
 		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
-	_ = os.MkdirAll(filepath.Dir(cachePath), 0o755)
-	_ = os.WriteFile(cachePath, body, 0o644)
-	go pruneSegmentCache()
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	pruneSegmentCacheAsync()
+	if ct == "" {
+		ct = "video/mp2t"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Cache", "miss")
 	_, _ = w.Write(body)

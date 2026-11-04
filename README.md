@@ -31,13 +31,16 @@ HOME_MEDIA_PORT=8090 HOME_MEDIA_DATA=./data ./home-media
 ```bash
 git clone https://github.com/doge2mars/HomeMedia.git
 cd HomeMedia
-# 先在 .env 里写好下面两项（不要用默认值对外服务）：
-#   HOME_MEDIA_SECRET=<长随机串，如 openssl rand -hex 32 的输出>
-#   HOME_MEDIA_ADMIN_PASS=<管理员密码>
+cp .env.example .env   # 编辑：HOME_MEDIA_SECRET（openssl rand -hex 32）、管理员密码、PUID/PGID、端口
+mkdir -p data          # 自己先建好数据目录（见下面“非 root 运行”）
 docker compose up -d --build
 ```
 
-打开 `http://localhost:8080`。数据（SQLite 库、海报缓存、分片缓存）全部 bind mount 在项目目录下的 `./data/` 里，备份整个项目目录即备份全部数据；部署到 NAS 时把 compose 里 `./data:/data` 那行改成大盘路径即可。
+打开 `http://<主机IP>:8090`（宿主机端口由 `.env` 里的 `HOME_MEDIA_HOST_PORT` 决定，默认 8090，容器内部固定 8080）。数据（SQLite 库、海报缓存、分片缓存）全部 bind mount 在 `./data/`（或 `.env` 里的 `HOME_MEDIA_DATA_DIR`），备份整个项目目录即备份全部数据；部署到 NAS 时把 `HOME_MEDIA_DATA_DIR` 指到大盘路径即可。
+
+**非 root 运行（飞牛 fnOS / 群晖 / 普通 Linux 账号）**：容器以 `PUID:PGID`（默认 1000:1000）运行，这样 `data/` 里的文件属于你自己的账号，在文件管理器 / SMB 里可以直接复制、备份、删除，不会被 root 锁死。用 `id -u`、`id -g` 查你的 ID 填进 `.env`。`data/` 要由你**先建好**——不存在时 Docker 会以 root 创建，非 root 的容器就写不进去。若已经被 root 创建过：`sudo chown -R $(id -u):$(id -g) data`。普通账号执行 docker 需要 `sudo`，或先 `sudo usermod -aG docker $USER` 后重新登录。
+
+镜像带 `HEALTHCHECK`（探测 `/api/ping`），`docker ps` 里能看到 healthy / unhealthy；`restart: unless-stopped` 保证异常退出和开机后自动拉起。
 
 注意：刚部署好的系统目录库和采集源是空的——采集源存在你原来那台服务器的数据库里，不在仓库里。进设置页加好源，再点“同步目录”，货架才有内容。
 
@@ -62,12 +65,13 @@ v2.go v3.go      搜索、直播、用户与设置等接口
 v4.go            SSE 流式聚合详情
 v5.go            即将上映、想看
 image_proxy.go   海报代理（SSRF 防护、磁盘缓存、多代理）
+segment_test.go  分片/m3u8 代理的回归测试（`go test ./...`）
 web/             网页端（单页 index.html）
 ```
 
 ## 安全提醒
 
-本项目仍在开发中，默认凭据只是开箱即用的占位：**自己部署时请先改 `HOME_MEDIA_SECRET` 和管理员密码**，且不要把服务直接暴露到公网。电视端 ExoPlayer 不带 Cookie，因此 `/api/proxy/m3u8` 与 `/api/proxy/segment` 目前不做登录鉴权，仅做了内网过滤之外的基础限制，部署时请放在内网或可信反代之后。
+本项目仍在开发中，默认凭据只是开箱即用的占位：**自己部署时请先改 `HOME_MEDIA_SECRET` 和管理员密码**，且不要把服务直接暴露到公网。电视端 ExoPlayer 不带 Cookie，因此 `/api/proxy/m3u8` 与 `/api/proxy/segment` 目前**既没有登录鉴权，也没有内网地址过滤**（内网过滤只在海报代理里做了），可被用来请求任意 URL。部署时请放在内网或可信反代之后，不要暴露到公网。
 
 ## 许可
 

@@ -1,16 +1,15 @@
 // HomeMedia v0.1 — 自研家庭影音原型：Go + SQLite 单进程
 // 设计约束（2026-11-04 定案）：
-//  - 目录库只囤元数据，不囤播放链接；点开才即时搜源拿新鲜集数/m3u8
-//  - 多用户独立播放记录/收藏；电视端 Selene-TV 契约优先（见 README）
-//  - 去广告在服务端 m3u8 代理层做一次，电视 ExoPlayer 也受益
-//  - 网页端同样是完整观看面，不只是管理后台
+//   - 目录库只囤元数据，不囤播放链接；点开才即时搜源拿新鲜集数/m3u8
+//   - 多用户独立播放记录/收藏；电视端 Selene-TV 契约优先（见 README）
+//   - 去广告在服务端 m3u8 代理层做一次，电视 ExoPlayer 也受益
+//   - 网页端同样是完整观看面，不只是管理后台
 package main
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
-	"sync/atomic"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -22,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -36,7 +36,9 @@ func main() {
 	_ = os.MkdirAll(dataDir, 0o755)
 	secret = []byte(getenv("HOME_MEDIA_SECRET", "home-media-dev-secret-change-me"))
 	var err error
-	db, err = sql.Open("sqlite3", filepath.Join(dataDir, "home-media.db")+"?cache=shared&_journal_mode=WAL")
+	// 不用 cache=shared：共享缓存模式下并发读写会直接返回 "database table is locked"，busy_timeout 管不了；
+	// WAL + _busy_timeout 让写冲突排队等待（目录同步批量写时，前台写进度/收藏不再报锁）。
+	db, err = sql.Open("sqlite3", filepath.Join(dataDir, "home-media.db")+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -230,7 +232,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func handlePing(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"ok": true}) }
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

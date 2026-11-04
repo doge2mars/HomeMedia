@@ -10,3 +10,4 @@ home-media.*
 *.tgz
 deploy-pkg/
 apk/
+.env
