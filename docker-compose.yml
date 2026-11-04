@@ -17,15 +17,15 @@ services:
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      # host port : container port (the app listens on 8080 inside the container)
-      - "${HOME_MEDIA_HOST_PORT:-8090}:8080"
+      # host port : container port (both unified to 8090 by default)
+      - "${HOME_MEDIA_PORT:-8090}:${HOME_MEDIA_PORT:-8090}"
     volumes:
       # SQLite library, poster cache and segment cache all live under /data.
       # On a NAS, point HOME_MEDIA_DATA_DIR at the big disk in .env, e.g.
       #   HOME_MEDIA_DATA_DIR=/vol1/1000/docker/home-media/data
       - ${HOME_MEDIA_DATA_DIR:-./data}:/data
     environment:
-      - HOME_MEDIA_PORT=8080
+      - HOME_MEDIA_PORT=${HOME_MEDIA_PORT:-8090}
       - HOME_MEDIA_DATA=/data
       - HOME_MEDIA_SECRET=${HOME_MEDIA_SECRET:-}
       - HOME_MEDIA_ADMIN_PASS=${HOME_MEDIA_ADMIN_PASS:-}

@@ -49,7 +49,15 @@ func main() {
 	go syncSchedulerLoop()
 
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir(filepath.Join(filepath.Dir(os.Args[0]), "web"))))
+	webDir := filepath.Join(filepath.Dir(os.Args[0]), "web")
+	fs := http.FileServer(http.Dir(webDir))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "" {
+			http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+			return
+		}
+		fs.ServeHTTP(w, r)
+	})
 	// FileServer root fallback: also serve embedded web dir if binary dir has no web/
 	mux.HandleFunc("/api/ping", handlePing)
 	mux.HandleFunc("/api/login", handleLogin)
