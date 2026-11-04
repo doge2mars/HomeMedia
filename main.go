@@ -49,11 +49,31 @@ func main() {
 	go syncSchedulerLoop()
 
 	mux := http.NewServeMux()
-	webDir := filepath.Join(filepath.Dir(os.Args[0]), "web")
+	exe, err := os.Executable()
+	var binDir string
+	if err == nil {
+		binDir = filepath.Dir(exe)
+	} else {
+		binDir = filepath.Dir(os.Args[0])
+	}
+	webDir := filepath.Join(binDir, "web")
+	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
+		if _, err := os.Stat("web/index.html"); err == nil {
+			webDir = "web"
+		}
+	}
 	fs := http.FileServer(http.Dir(webDir))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "" {
-			http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+			indexPath := filepath.Join(webDir, "index.html")
+			data, err := os.ReadFile(indexPath)
+			if err != nil {
+				http.Error(w, "Cannot read index.html: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
 			return
 		}
 		fs.ServeHTTP(w, r)

@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=builder /out/home-media /app/home-media
 COPY web /app/web
+RUN chmod -R 755 /app && mkdir -p /data && chmod 777 /data
 EXPOSE 8090
 # The container is meant to run as a non-root user (see `user:` in docker-compose.yml);
 # nothing in the image needs root at runtime, only the mounted /data must be writable.
