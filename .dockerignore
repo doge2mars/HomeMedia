@@ -1,0 +1,12 @@
+.git
+data/
+*.log
+home-media
+home-media.*
+*.bak-*
+*.old
+*.old2
+*.old3
+*.tgz
+deploy-pkg/
+apk/

@@ -1,0 +1,25 @@
+# HomeMedia — bind-mount deployment (no Docker named volumes, by design:
+# the project directory stays self-contained; back up the directory itself).
+#
+# Before first start, create a .env file next to this compose file with:
+#   HOME_MEDIA_SECRET=<a long random string, e.g. openssl rand -hex 32>
+#   HOME_MEDIA_ADMIN_PASS=<your admin password>
+# If left unset, the app falls back to its built-in defaults — change them
+# before exposing the service to anyone else.
+services:
+  home-media:
+    build: .
+    container_name: home-media
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # SQLite library, poster cache and segment cache all live under /data.
+      # On a NAS, point this at the big disk instead, e.g.:
+      # - /vol1/1000/docker/home-media/data:/data
+      - ./data:/data
+    environment:
+      - HOME_MEDIA_PORT=8080
+      - HOME_MEDIA_DATA=/data
+      - HOME_MEDIA_SECRET=${HOME_MEDIA_SECRET}
+      - HOME_MEDIA_ADMIN_PASS=${HOME_MEDIA_ADMIN_PASS}

@@ -26,6 +26,21 @@ HOME_MEDIA_PORT=8090 HOME_MEDIA_DATA=./data ./home-media
 
 打开 `http://localhost:8090`，默认管理员 `admin / admin123`。
 
+## Docker 部署
+
+```bash
+git clone https://github.com/doge2mars/HomeMedia.git
+cd HomeMedia
+# 先在 .env 里写好下面两项（不要用默认值对外服务）：
+#   HOME_MEDIA_SECRET=<长随机串，如 openssl rand -hex 32 的输出>
+#   HOME_MEDIA_ADMIN_PASS=<管理员密码>
+docker compose up -d --build
+```
+
+打开 `http://localhost:8080`。数据（SQLite 库、海报缓存、分片缓存）全部 bind mount 在项目目录下的 `./data/` 里，备份整个项目目录即备份全部数据；部署到 NAS 时把 compose 里 `./data:/data` 那行改成大盘路径即可。
+
+注意：刚部署好的系统目录库和采集源是空的——采集源存在你原来那台服务器的数据库里，不在仓库里。进设置页加好源，再点“同步目录”，货架才有内容。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
