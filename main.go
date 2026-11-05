@@ -122,6 +122,7 @@ func main() {
 	mux.HandleFunc("/api/live/subscribe", auth(ownerOnly(handleLiveSubscribe)))
 	mux.HandleFunc("/api/live/channels", auth(handleLiveChannelsV3))
 	mux.HandleFunc("/api/live", auth(handleLive))
+	mux.HandleFunc("/api/play/best", auth(handlePlayBest))
 	mux.HandleFunc("/api/proxy/m3u8", handleProxyM3U8)
 	mux.HandleFunc("/api/proxy/segment", handleProxySegment)
 	mux.HandleFunc("/api/image-proxy", handleImageProxy)
