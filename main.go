@@ -95,6 +95,8 @@ func main() {
 	mux.HandleFunc("/api/search/ws", auth(handleSearchWS))
 	mux.HandleFunc("/api/detail", auth(handleDetail))
 	mux.HandleFunc("/api/catalog", auth(handleCatalog))
+	mux.HandleFunc("/api/catalog/related", auth(handleCatalogRelated))
+	mux.HandleFunc("/api/trending-household", auth(handleTrendingHousehold))
 	mux.HandleFunc("/api/douban", auth(handleDouban))
 	mux.HandleFunc("/api/douban-proxy", auth(handleDoubanProxyGet))
 	mux.HandleFunc("/api/douban-proxy/save", auth(ownerOnly(handleDoubanProxySave)))
@@ -598,7 +600,15 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		sqlQ += ` AND title LIKE ?`
 		args = append(args, "%"+keyword+"%")
 	}
-	sqlQ += ` ORDER BY updated_at DESC LIMIT ?`
+	if q.Get("shuffle") == "1" {
+		// “换一批”：约束随机，只出评分≥7 或近 3 年的，防翻出烂片
+		sqlQ += ` AND (CAST(rating AS REAL) >= 7 OR CAST(year AS INTEGER) >= 2023)`
+	}
+	if q.Get("shuffle") == "1" {
+		sqlQ += ` ORDER BY RANDOM() LIMIT ?`
+	} else {
+		sqlQ += ` ORDER BY updated_at DESC LIMIT ?`
+	}
 	args = append(args, limit)
 	rows, err := db.Query(sqlQ, args...)
 	if err != nil {
