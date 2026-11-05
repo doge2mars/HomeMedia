@@ -49,8 +49,8 @@ func handlePlayBest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "missing candidates"})
 		return
 	}
-	if len(b.Candidates) > 12 {
-		b.Candidates = b.Candidates[:12]
+	if len(b.Candidates) > 30 {
+		b.Candidates = b.Candidates[:30]
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
