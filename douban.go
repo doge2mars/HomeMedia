@@ -75,10 +75,16 @@ func getDoubanProxy() (string, string) {
 	return t, strings.TrimSpace(getenv("HOME_MEDIA_DOUBAN_PROXY_URL", ""))
 }
 
-// doubanListURL：按当前代理拼榜单地址。zwei 是前缀式代理（目标地址整体 URL 编码后接在后面，
-// 与 LunaTV fetchWithTimeout 同款）；其余是换 base 域名。
+// doubanListURL：按当前代理拼榜单地址。
 func doubanListURL(doubanType, tag, sort string, limit int) string {
 	typ, custom := getDoubanProxy()
+	return doubanListURLWith(typ, custom, doubanType, tag, sort, limit)
+}
+
+// doubanListURLWith：按指定档位拼榜单地址（代理测试用：未保存的档位也能测）。
+// zwei 是前缀式代理（目标地址整体 URL 编码后接在后面，
+// 与 LunaTV fetchWithTimeout 同款）；其余是换 base 域名。
+func doubanListURLWith(typ, custom, doubanType, tag, sort string, limit int) string {
 	base, ok := doubanProxyTypes[typ]
 	if !ok {
 		if typ == "custom" && custom != "" {
@@ -120,8 +126,22 @@ var (
 // fetchDoubanList：调豆瓣榜单接口，返回首页卡片直接能用的条目
 // （title/poster/rating/year/type，与 /api/catalog 的条目字段对齐）。
 func fetchDoubanList(doubanType, tag, sort string, limit int) ([]map[string]any, error) {
-	u := doubanListURL(doubanType, tag, sort, limit)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return fetchDoubanListTimeout(doubanType, tag, sort, limit, 10*time.Second)
+}
+
+// fetchDoubanListTimeout：同上，可指定超时（代理测试用 5 秒）。
+func fetchDoubanListTimeout(doubanType, tag, sort string, limit int, timeout time.Duration) ([]map[string]any, error) {
+	return fetchDoubanURL(doubanListURL(doubanType, tag, sort, limit), doubanType, timeout)
+}
+
+// fetchDoubanListWithProxy：用指定档位（未保存的也行，供代理测试）拉榜单。
+func fetchDoubanListWithProxy(typ, custom, doubanType, tag, sort string, limit int, timeout time.Duration) ([]map[string]any, error) {
+	return fetchDoubanURL(doubanListURLWith(typ, custom, doubanType, tag, sort, limit), doubanType, timeout)
+}
+
+// fetchDoubanURL：按给定地址调榜单接口并解析成首页卡片条目。
+func fetchDoubanURL(u, doubanType string, timeout time.Duration) ([]map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
@@ -248,4 +268,42 @@ func handleDoubanProxySave(w http.ResponseWriter, r *http.Request) {
 	doubanCache = map[string]doubanCacheEntry{}
 	doubanCacheMu.Unlock()
 	writeJSON(w, 200, map[string]any{"type": body.Type, "custom": body.Custom})
+}
+
+// handleDoubanProxyTest：POST /api/douban-proxy/test（仅站长）。
+// 用当前选中的档位（body 可带 type/custom，未带则用已保存的）真实拉一次榜单
+// （tag=热门，limit=1，5 秒超时，不走缓存），回显成功/失败 + 耗时。
+// 上游失败也返回 200（ok=false），让设置页直接显示原因，而不是弹通用错误。
+func handleDoubanProxyTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	var body doubanProxyCfg
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	body.Type = strings.TrimSpace(body.Type)
+	body.Custom = strings.TrimSpace(body.Custom)
+	if body.Type == "" {
+		body.Type, body.Custom = getDoubanProxy()
+	}
+	if !validDoubanProxyType(body.Type) {
+		writeJSON(w, 400, map[string]string{"error": "bad proxy type"})
+		return
+	}
+	if body.Type == "custom" {
+		u, err := url.Parse(body.Custom)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			writeJSON(w, 400, map[string]string{"error": "bad custom proxy url"})
+			return
+		}
+		body.Custom = strings.TrimSuffix(body.Custom, "/")
+	}
+	start := time.Now()
+	items, err := fetchDoubanListWithProxy(body.Type, body.Custom, "movie", "热门", "recommend", 1, 5*time.Second)
+	ms := time.Since(start).Milliseconds()
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "ms": ms, "type": body.Type, "custom": body.Custom, "error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "ms": ms, "type": body.Type, "custom": body.Custom, "items": len(items)})
 }

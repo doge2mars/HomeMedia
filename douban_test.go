@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -99,5 +100,74 @@ func TestHandleDoubanCache(t *testing.T) {
 	}
 	if hits != 1 {
 		t.Fatalf("upstream hits = %d, want 1 (second call served from cache)", hits)
+	}
+}
+
+func TestHandleDoubanProxyTest(t *testing.T) {
+	// 假豆瓣：只返回 1 条
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"subjects": []map[string]any{
+			{"id": "1", "title": "测试电影", "cover": "https://img.example.com/p1.jpg", "rate": "8.5", "card_subtitle": "2026"},
+		}})
+	}))
+	defer srv.Close()
+
+	// 成功：用 body 里的 custom 档位（未保存也能测）
+	body := `{"type":"custom","custom":` + strconv.Quote(srv.URL) + `}`
+	req := httptest.NewRequest("POST", "/api/douban-proxy/test", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	handleDoubanProxyTest(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d, body %s", rec.Code, rec.Body.String())
+	}
+	var d struct {
+		OK    bool   `json:"ok"`
+		Items int    `json:"items"`
+		Ms    int64  `json:"ms"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatalf("bad json: %v", err)
+	}
+	if !d.OK || d.Items != 1 {
+		t.Fatalf("result = %+v, want ok with 1 item", d)
+	}
+
+	// 失败：指到已关掉的服务，应回 ok=false 而不是 5xx
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	dead.Close()
+	body2 := `{"type":"custom","custom":` + strconv.Quote(dead.URL) + `}`
+	req2 := httptest.NewRequest("POST", "/api/douban-proxy/test", strings.NewReader(body2))
+	rec2 := httptest.NewRecorder()
+	handleDoubanProxyTest(rec2, req2)
+	if rec2.Code != 200 {
+		t.Fatalf("dead upstream: status %d, want 200 with ok=false", rec2.Code)
+	}
+	var d2 struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &d2); err != nil {
+		t.Fatalf("bad json: %v", err)
+	}
+	if d2.OK || d2.Error == "" {
+		t.Fatalf("dead upstream result = %+v, want ok=false with error", d2)
+	}
+
+	// 非 POST 应 405
+	req3 := httptest.NewRequest("GET", "/api/douban-proxy/test", nil)
+	rec3 := httptest.NewRecorder()
+	handleDoubanProxyTest(rec3, req3)
+	if rec3.Code != 405 {
+		t.Fatalf("GET status %d, want 405", rec3.Code)
+	}
+
+	// 非法档位应 400
+	req4 := httptest.NewRequest("POST", "/api/douban-proxy/test", strings.NewReader(`{"type":"bogus"}`))
+	rec4 := httptest.NewRecorder()
+	handleDoubanProxyTest(rec4, req4)
+	if rec4.Code != 400 {
+		t.Fatalf("bogus type status %d, want 400", rec4.Code)
 	}
 }

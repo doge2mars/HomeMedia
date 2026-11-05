@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -170,11 +172,77 @@ func fetchAndCache(raw string) ([]byte, string, error) {
 		}
 	}
 	if err != nil {
+		// 海报拉不到要有迹可查：记 URL + 上游状态/错误（海报地址不含敏感信息）
+		log.Printf("image-proxy: fetch failed url=%s err=%v", raw, err)
 		return nil, "", err
 	}
 	_ = os.WriteFile(bodyPath, body, 0o644)
 	_ = os.WriteFile(metaPath, []byte(ct), 0o644)
 	return body, ct, nil
+}
+
+// imageProbeResult：单个图片代理的测试结果。
+type imageProbeResult struct {
+	Name  string `json:"name"` // 直连 或代理地址
+	OK    bool   `json:"ok"`
+	Ms    int64  `json:"ms"`
+	Error string `json:"error,omitempty"`
+}
+
+// probeImageProxies：对直连 + 每个已配代理并发真实拉一张图（各 5 秒超时），返回每路结果。
+// 只测连通性，不写缓存。
+func probeImageProxies(probeURL string) []imageProbeResult {
+	type cand struct{ name, proxy string }
+	cands := []cand{{"直连", ""}}
+	for _, p := range getImageProxies() {
+		cands = append(cands, cand{p, p})
+	}
+	results := make([]imageProbeResult, len(cands))
+	var wg sync.WaitGroup
+	for i, c := range cands {
+		wg.Add(1)
+		go func(i int, name, proxy string) {
+			defer wg.Done()
+			start := time.Now()
+			_, _, err := fetchImageOnce(probeURL, proxy, 5*time.Second)
+			r := imageProbeResult{Name: name, Ms: time.Since(start).Milliseconds()}
+			if err != nil {
+				r.Error = err.Error()
+			} else {
+				r.OK = true
+			}
+			results[i] = r
+		}(i, c.name, c.proxy)
+	}
+	wg.Wait()
+	return results
+}
+
+// imageProbeFallbackURL：取不到实时海报时的兜底探针图（2026-11-06 实测可达的豆瓣海报）。
+const imageProbeFallbackURL = "https://img9.doubanio.com/view/photo/s_ratio_poster/public/p2935652656.jpg"
+
+// probeImageURL：测试用的海报地址——先用当前豆瓣代理拉热门榜单取第一张封面，
+// 拿不到就用兜底图。
+func probeImageURL() string {
+	if items, err := fetchDoubanListTimeout("movie", "热门", "recommend", 3, 5*time.Second); err == nil {
+		for _, it := range items {
+			if p, _ := it["poster"].(string); p != "" {
+				return p
+			}
+		}
+	}
+	return imageProbeFallbackURL
+}
+
+// handleImageProxiesTest：POST /api/image-proxies/test（仅站长）。
+// 对直连 + 每个已配图片代理真实拉一张海报，回显每路成功/失败 + 耗时。
+func handleImageProxiesTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	u := probeImageURL()
+	writeJSON(w, 200, map[string]any{"url": u, "results": probeImageProxies(u)})
 }
 
 // prefetchCatalogPosters：目录同步完成 / 服务启动后后台预取海报（并发 8），让常逛的页面是热缓存。

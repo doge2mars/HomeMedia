@@ -100,10 +100,12 @@ func main() {
 	mux.HandleFunc("/api/douban", auth(handleDouban))
 	mux.HandleFunc("/api/douban-proxy", auth(handleDoubanProxyGet))
 	mux.HandleFunc("/api/douban-proxy/save", auth(ownerOnly(handleDoubanProxySave)))
+	mux.HandleFunc("/api/douban-proxy/test", auth(ownerOnly(handleDoubanProxyTest)))
 	mux.HandleFunc("/api/catalog/sync", auth(handleCatalogSync))
 	mux.HandleFunc("/api/catalog/meta", auth(handleCatalogMeta))
 	mux.HandleFunc("/api/image-proxies", auth(handleImageProxiesGet))
 	mux.HandleFunc("/api/image-proxies/save", auth(ownerOnly(handleImageProxiesSave)))
+	mux.HandleFunc("/api/image-proxies/test", auth(ownerOnly(handleImageProxiesTest)))
 	mux.HandleFunc("/api/sync-config", auth(handleSyncConfig))
 	mux.HandleFunc("/api/me", auth(handleMe))
 	mux.HandleFunc("/api/sources", auth(handleSourcesV2))
@@ -568,10 +570,12 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sqlQ := `SELECT title, poster, year, region, genre, type, douban_id, rating, synopsis FROM catalog WHERE 1=1`
+	// 体育已下线（2026-11-06）：目录接口不再返回体育类条目
+	sqlQ += ` AND COALESCE(kind,'') != '体育'`
 	args := []any{}
 	// 网页粗分类（电影片/连续剧/国产剧/综艺片/动漫片/短剧）按 kind 匹配，
 	// 其余值（动作片/喜剧片等体裁）仍按 type 精确匹配；两者互不干扰
-	coarseKind := map[string]string{"电影片": "电影", "连续剧": "剧集", "国产剧": "剧集", "综艺片": "综艺", "动漫片": "动漫", "短剧": "短剧", "电影": "电影", "剧集": "剧集", "综艺": "综艺", "动漫": "动漫", "体育": "体育", "其他": "其他"}
+	coarseKind := map[string]string{"电影片": "电影", "连续剧": "剧集", "国产剧": "剧集", "综艺片": "综艺", "动漫片": "动漫", "短剧": "短剧", "电影": "电影", "剧集": "剧集", "综艺": "综艺", "动漫": "动漫", "其他": "其他"}
 	if typ != "" {
 		if k, ok := coarseKind[typ]; ok {
 			sqlQ += ` AND kind=?`
@@ -633,7 +637,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 	// 货架切分类时下拉选项跟着变，不再全库一套选项。
 	typ := r.URL.Query().Get("type")
 	kindFilter, typeFilter := "", ""
-	coarseKind := map[string]string{"电影片": "电影", "连续剧": "剧集", "国产剧": "剧集", "综艺片": "综艺", "动漫片": "动漫", "短剧": "短剧", "电影": "电影", "剧集": "剧集", "综艺": "综艺", "动漫": "动漫", "体育": "体育", "其他": "其他"}
+	coarseKind := map[string]string{"电影片": "电影", "连续剧": "剧集", "国产剧": "剧集", "综艺片": "综艺", "动漫片": "动漫", "短剧": "短剧", "电影": "电影", "剧集": "剧集", "综艺": "综艺", "动漫": "动漫", "其他": "其他"}
 	if typ != "" {
 		if k, ok := coarseKind[typ]; ok {
 			kindFilter = k
@@ -641,7 +645,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 			typeFilter = typ
 		}
 	}
-	regionQ := `SELECT region, COUNT(*) c FROM catalog WHERE region!=''`
+	regionQ := `SELECT region, COUNT(*) c FROM catalog WHERE region!='' AND COALESCE(kind,'') != '体育'`
 	regionArgs := []any{}
 	if kindFilter != "" {
 		regionQ += ` AND kind=?`
@@ -681,7 +685,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	genreCount := map[string]int{}
-	genreQ := `SELECT genre FROM catalog WHERE genre!=''`
+	genreQ := `SELECT genre FROM catalog WHERE genre!='' AND COALESCE(kind,'') != '体育'`
 	genreArgs := []any{}
 	if kindFilter != "" {
 		genreQ += ` AND kind=?`

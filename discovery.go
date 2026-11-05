@@ -68,10 +68,10 @@ func handleCatalogRelated(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 	if kind != "" {
-		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND kind=? ORDER BY (type=?) DESC, (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
+		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND kind=? AND COALESCE(kind,'') != '体育' ORDER BY (type=?) DESC, (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
 			title, kind, typ, "%"+reg+"%", year, limit)
 	} else {
-		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND type=? ORDER BY (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
+		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND type=? AND COALESCE(kind,'') != '体育' ORDER BY (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
 			title, typ, "%"+reg+"%", year, limit)
 	}
 	if err != nil {

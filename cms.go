@@ -380,6 +380,21 @@ type catalogItem struct {
 // 细标签，网页要的“连续剧”全库仅 45 条，精确匹配下筛日本约等于 0）。
 // 顺序有讲究：短剧/动漫/综艺/体育先于剧/片；题材型标签（现代都市、古装仙侠…）
 // 在源站里长短剧与剧集混用，统一归剧集，短剧桶只收带明确短剧标记的（宁缺毋滥）。
+// sportsKeywords：体育类关键词（与 kindOf 的体育分支同款）。
+// 2026-11-06 用户决定体育分类下线：同步跳过此类条目，目录接口不再返回。
+var sportsKeywords = []string{"足球", "篮球", "斯诺克", "网球", "台球", "赛事", "西甲", "英超", "法甲", "意甲", "德甲", "NBA", "CBA", "WCBA", "LPL", "体育"}
+
+// isSportsKind：源站细分类/题材是否体育内容。
+func isSportsKind(typ, genre string) bool {
+	s := typ + " " + genre
+	for _, sub := range sportsKeywords {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 func kindOf(typ, genre string) string {
 	s := typ + " " + genre
 	has := func(subs ...string) bool {
@@ -397,7 +412,7 @@ func kindOf(typ, genre string) string {
 		return "动漫"
 	case has("综艺", "演唱会"):
 		return "综艺"
-	case has("足球", "篮球", "斯诺克", "网球", "台球", "赛事", "西甲", "英超", "法甲", "意甲", "德甲", "NBA", "CBA", "WCBA", "LPL", "体育"):
+	case isSportsKind(typ, genre):
 		return "体育"
 	// 电影片必须先于“剧”判断：喜剧片/剧情片/爱情片的 genre 里常带“剧情/喜剧”，
 	// 旧版先判“剧”子串会把几千部电影错归为剧集；片一律以 type 为准（片尾/电影字样）。
@@ -508,6 +523,9 @@ func syncCatalogWith(cfg syncConfig) error {
 				// 每类写完立刻落库（写库串行加锁）：长同步中途也能看到库在涨，中断也不白跑
 				mu.Lock()
 				for _, it := range catItems {
+					if isSportsKind(it.typ, it.genre) {
+						continue // 体育已下线：不同步入库
+					}
 					_, _ = db.Exec(`INSERT OR IGNORE INTO catalog(title, poster, year, region, genre, type, douban_id, rating, synopsis, updated_at, kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 						it.title, it.poster, it.year, it.region, it.genre, it.typ, "", it.rating, it.synopsis, now, kindOf(it.typ, it.genre))
 				}
