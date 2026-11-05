@@ -51,6 +51,7 @@ func main() {
 	}
 	seed()
 	go syncSchedulerLoop()
+	go healthRetestLoop() // #1：源健康度复测（启动 1 分钟后首次，之后每 6 小时）
 	// 启动时也预取一遍当季海报：磁盘缓存还在，命中就是瞬回；服务常重启，重启后首页不再冷启动
 	go prefetchCatalogPosters()
 
@@ -113,6 +114,8 @@ func main() {
 	mux.HandleFunc("/api/detail-aggregate-stream", auth(handleDetailAggregateStream))
 	mux.HandleFunc("/api/sources/test-all", auth(ownerOnly(handleSourcesTestAll)))
 	mux.HandleFunc("/api/sources/disable-failed", auth(ownerOnly(handleSourcesDisableFailed)))
+	mux.HandleFunc("/api/sources/health", auth(handleSourcesHealth))
+	mux.HandleFunc("/api/sources/health-retest", auth(ownerOnly(handleSourcesHealthRetest)))
 	mux.HandleFunc("/api/sources/dedupe", auth(ownerOnly(handleSourcesDedupe)))
 	mux.HandleFunc("/api/users", auth(ownerOnly(handleUsers)))
 	mux.HandleFunc("/api/change-password", auth(handleChangePassword))

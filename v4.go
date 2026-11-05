@@ -80,10 +80,24 @@ func aggregateOneSource(ctx context.Context, s Source, title, want string) *aggS
 }
 
 func searchSourceCtx(ctx context.Context, s Source, q string) ([]SearchItem, error) {
+	// #2 负缓存：同 searchSource（WS 搜索与详情聚合都走这里）。
+	if negCacheHit(s.Key, q) {
+		return []SearchItem{}, nil
+	}
+	return searchSourceCtxDirect(ctx, s, q)
+}
+
+// searchSourceCtxDirect：不带负缓存的搜索本体（复测探针用：探针必须真的去问源站，
+// 不能命中“上次失败”的负缓存而误判源已恢复）。
+func searchSourceCtxDirect(ctx context.Context, s Source, q string) ([]SearchItem, error) {
+	start := time.Now()
 	d, err := cmsGetCtx(ctx, s.API, "ac=videolist&wd="+url.QueryEscape(q))
 	if err != nil {
+		recordSearchOutcome(s.Key, err, time.Since(start).Milliseconds())
+		negCacheSet(s.Key, q)
 		return nil, err
 	}
+	recordSearchOutcome(s.Key, nil, time.Since(start).Milliseconds())
 	var out []SearchItem
 	for _, m := range parseVodList(d) {
 		out = append(out, SearchItem{
@@ -184,9 +198,9 @@ func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// 测速与详情并行后发：先让用户播，不等测速
-			if sp, res, err := speedTestSource(ctx, sd.Episodes); err == nil {
+			if sp, res, lat, err := speedTestSource(ctx, sd.Episodes); err == nil {
 				mu.Lock()
-				emit(map[string]any{"type": "speed", "source": sd.Source, "id": sd.ID, "speed_kbs": sp, "resolution": res})
+				emit(map[string]any{"type": "speed", "source": sd.Source, "id": sd.ID, "speed_kbs": sp, "resolution": res, "latency_ms": lat, "score": scoreProbe(res, sp, lat)})
 				mu.Unlock()
 			}
 		}()
@@ -203,10 +217,11 @@ func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // 测速：取一集 m3u8（优先第 2 集，更具代表性，同款思路），
-// 解析 master 播放列表的最高分辨率，下载首个分片一部分算速度；8 秒超时，失败不淘汰该源
-func speedTestSource(ctx context.Context, episodes []string) (float64, string, error) {
+// 解析 master 播放列表的最高分辨率，下载首个分片一部分算速度；8 秒超时，失败不淘汰该源。
+// 返回：速度 KB/s、最高分辨率、首包延迟 ms（第一次取播放列表的 TTFB，供加权评分用）。
+func speedTestSource(ctx context.Context, episodes []string) (float64, string, int64, error) {
 	if len(episodes) == 0 {
-		return 0, "", fmt.Errorf("no episodes")
+		return 0, "", 0, fmt.Errorf("no episodes")
 	}
 	idx := 0
 	if len(episodes) > 1 {
@@ -215,16 +230,18 @@ func speedTestSource(ctx context.Context, episodes []string) (float64, string, e
 	raw := episodes[idx]
 	ctx2, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	fetchStart := time.Now()
 	req, _ := http.NewRequestWithContext(ctx2, "GET", raw, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return 0, "", err
+		return 0, "", 0, err
 	}
+	latencyMs := time.Since(fetchStart).Milliseconds()
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		return 0, "", err
+		return 0, "", latencyMs, err
 	}
 	text := string(body)
 	res := ""
@@ -273,7 +290,7 @@ func speedTestSource(ctx context.Context, episodes []string) (float64, string, e
 		}
 	}
 	if segURL == "" {
-		return 0, res, fmt.Errorf("no segment")
+		return 0, res, latencyMs, fmt.Errorf("no segment")
 	}
 	if !strings.HasPrefix(segURL, "http") {
 		if b, err := url.Parse(raw); err == nil {
@@ -287,7 +304,7 @@ func speedTestSource(ctx context.Context, episodes []string) (float64, string, e
 	req3.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
 	resp3, err := httpClient.Do(req3)
 	if err != nil {
-		return 0, res, err
+		return 0, res, latencyMs, err
 	}
 	defer resp3.Body.Close()
 	n, _ := io.Copy(io.Discard, io.LimitReader(resp3.Body, 512<<10))
@@ -295,10 +312,10 @@ func speedTestSource(ctx context.Context, episodes []string) (float64, string, e
 	if elapsed <= 0 {
 		elapsed = 0.001
 	}
-	return float64(n) / 1024 / elapsed, res, nil
+	return float64(n) / 1024 / elapsed, res, latencyMs, nil
 }
 
-// ---- 一键测全部源 ----
+// ---- 一键测全部源（探针逻辑见 health.go testSourceOnce） ----
 func handleSourcesTestAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]string{"error": "method"})
@@ -323,14 +340,8 @@ func handleSourcesTestAll(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			start := time.Now()
-			cats, catErr := cmsCategories(s.API)
-			_, searchErr := cmsGet(s.API, "ac=videolist&wd="+url.QueryEscape("繁花"))
-			errStr := ""
-			if catErr != nil && searchErr != nil {
-				errStr = catErr.Error()
-			}
-			out[i] = res{Key: s.Key, Name: s.Name, OK: catErr == nil || searchErr == nil, Ms: time.Since(start).Milliseconds(), Categories: len(cats), Error: errStr}
+			ok, ms, cats, errStr := testSourceOnce(s)
+			out[i] = res{Key: s.Key, Name: s.Name, OK: ok, Ms: ms, Categories: cats, Error: errStr}
 		}()
 	}
 	wg.Wait()

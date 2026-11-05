@@ -130,10 +130,20 @@ func parsePlayURLs(playURL string) []string {
 }
 
 func searchSource(s Source, q string) ([]SearchItem, error) {
+	// #2 负缓存：该源对该词刚失败过（10 分钟内）→ 直接返回空，不再发请求；
+	// 命中不记健康（没发请求就没有失败）。
+	if negCacheHit(s.Key, q) {
+		return []SearchItem{}, nil
+	}
+	start := time.Now()
 	d, err := cmsGet(s.API, "ac=videolist&wd="+url.QueryEscape(q))
 	if err != nil {
+		// #1 健康记分 + #2 负缓存：失败才记，空结果（err==nil 但 list 为空）不是失败
+		recordSearchOutcome(s.Key, err, time.Since(start).Milliseconds())
+		negCacheSet(s.Key, q)
 		return nil, err
 	}
+	recordSearchOutcome(s.Key, nil, time.Since(start).Milliseconds())
 	var out []SearchItem
 	for _, m := range parseVodList(d) {
 		id := sField(m, "vod_id", "id")

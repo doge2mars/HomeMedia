@@ -40,7 +40,7 @@ func TestProbePlayURLCapsSegment(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	speed, _, err := probePlayURL(context.Background(), srv.URL+"/big.m3u8")
+	speed, _, _, err := probePlayURL(context.Background(), srv.URL+"/big.m3u8")
 	if err != nil {
 		t.Fatalf("probe 20MB segment: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestProbePlayURLCapsSegment(t *testing.T) {
 	}
 
 	// 1MB 完整分片：照常进缓存（正常路径没被破坏）。
-	if _, _, err := probePlayURL(context.Background(), srv.URL+"/small.m3u8"); err != nil {
+	if _, _, _, err := probePlayURL(context.Background(), srv.URL+"/small.m3u8"); err != nil {
 		t.Fatalf("probe 1MB segment: %v", err)
 	}
 	if _, err := os.Stat(segmentCachePath(srv.URL + "/small.ts")); err != nil {

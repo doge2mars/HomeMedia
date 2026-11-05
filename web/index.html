@@ -277,7 +277,7 @@ let searchAbort=null;
 async function doSearch(title){ try{ const q=title||document.getElementById('q').value; if(!q) return; if(searchAbort) searchAbort.abort(); searchAbort=new AbortController(); const el=document.getElementById('results'); el.innerHTML='<div class="muted">正在并行搜索各源…</div>'; const r=await fetch('/api/search?q='+encodeURIComponent(q),{signal:searchAbort.signal}); if(r.status===401) throw new Error('请先登录'); const d=await r.json(); el.innerHTML=''; if(!d.results.length){ el.innerHTML='<div class="muted">没有搜到，换个关键词，或去设置里检查源是否被禁用/失效。</div>'; return; } agg(d.results).forEach(it=>el.appendChild(card(it, ()=>openTitle(it.title)))); }catch(e){ if(e.name==='AbortError') return; toast(e.message); } }
 let curES=null, curSpeed={}, curDetailTitle='', directPlayWaiting=false, dpSeq=0;
 function speedLabel(s){ if(!curSpeed[s.source]) return ''; const sp=curSpeed[s.source]; return sp.speed_kbs? ` · ${(sp.speed_kbs/1024).toFixed(2)} MB/s${sp.resolution?' · '+sp.resolution:''}` : ''; }
-function sortBySpeed(){ curSources.sort((a,b)=>{ const sa=curSpeed[a.source]?.speed_kbs||-1, sb=curSpeed[b.source]?.speed_kbs||-1; return sb-sa; }); }
+function sortByScore(){ curSources.sort((a,b)=>{ const sa=curSpeed[a.source]?.score??-1, sb=curSpeed[b.source]?.score??-1; if(sb!==sa) return sb-sa; const ka=curSpeed[a.source]?.speed_kbs||-1, kb=curSpeed[b.source]?.speed_kbs||-1; return kb-ka; }); }
 let resumeByEpisode={}, resumeRecord=null;
 async function loadResumeForTitle(title){ resumeByEpisode={}; resumeRecord=null; try{ const d=await api('/api/playrecords'); Object.entries(d).forEach(([key,rec])=>{ if(rec.search_title===title||rec.title===title){ rec.key=key; rec.source=key.split('+')[0]; const idx=(rec.index||0); if(!resumeByEpisode[idx]||rec.save_time>resumeByEpisode[idx].save_time) resumeByEpisode[idx]=rec; if(!resumeRecord||rec.save_time>resumeRecord.save_time) resumeRecord=rec; } }); }catch(e){} }
 function resumePlay(){ if(!resumeRecord||!curSources.length) return; let idx=curSources.findIndex(s=>s.source===resumeRecord.source); if(idx<0) idx=0; const ep=Math.min(resumeRecord.index||0, (curSources[idx].episodes||[]).length-1); if(ep<0) return toast('可续看的集数在这个源里没有'); playSrc(idx, ep, {startTime: resumeRecord.play_time||0}); }
@@ -303,12 +303,12 @@ async function openTitle(title){
       else { renderDetailSrc(curSrcIdx); }
       return;
     }
-    if(d.type==='speed'){ curSpeed[d.source]={speed_kbs:d.speed_kbs, resolution:d.resolution}; const wasPlaying=!!cur; sortBySpeed(); renderDetailSrc(0); if(!wasPlaying){ document.getElementById('aggProgress').textContent=`测速完成，最快的是 ${curSources[0]?.source_name||''}。`; } return; }
+    if(d.type==='speed'){ curSpeed[d.source]={speed_kbs:d.speed_kbs, resolution:d.resolution, latency_ms:d.latency_ms, score:d.score}; const wasPlaying=!!cur; sortByScore(); renderDetailSrc(0); if(!wasPlaying){ document.getElementById('aggProgress').textContent=`测速完成，最快的是 ${curSources[0]?.source_name||''}。`; } return; }
     if(d.type==='complete'){ curES.close(); curES=null; if(!curSources.length){ document.getElementById('detailBody').innerHTML=`<p class="muted">暂无可播源：各源都没有精确匹配到这个标题，换个关键词搜一下。</p>`; } else { document.getElementById('aggProgress').textContent=`聚合完成，共 ${curSources.length} 个源。`; } if(directPlayWaiting){ directPlayWaiting=false; const st=document.getElementById('pstatus'); if(st) st.textContent='播放失败：所有源都打不开，点上方“播放源”手动换一个试试。'; } return; }
   };
   curES.onerror=()=>{ if(curES){ curES.close(); curES=null; } if(!curSources.length){ document.getElementById('detailBody').innerHTML=`<p class="muted">聚合失败：网络或源超时，换个关键词或去设置里测一下源。</p>`; } };
 }
-function playBestProbe(){ if(!curSources.length) return toast('还没有可播的源'); const cands=curSources.map(s=>({source:s.source, source_name:s.source_name, url:(s.episodes||[])[0]})).filter(c=>c.url); if(!cands.length) return toast('这些源都没有集数'); const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px'; ov.textContent='正在测速 '+cands.length+' 个源…'; document.body.appendChild(ov); api('/api/play/best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({candidates:cands})}).then(d=>{ const res=d.results||[]; res.forEach(r=>{ if(r.speed_kbs) curSpeed[r.source]={speed_kbs:r.speed_kbs, resolution:r.resolution||''}; }); sortBySpeed(); renderDetailSrc(0); const best=res.find(r=>r.ok); const ep=(cur&&cur.title===curSources[0].title)?cur.index:0; if(best){ toast('优选：'+best.source_name+'（'+(best.speed_kbs/1024).toFixed(2)+' MB/s）'); } else { toast('测速都超时了，先播第一个源，失败会自动换源'); } playSrc(0, ep); }).catch(e=>{ toast('测速失败：'+e.message+'，改播第一个源'); playSrc(0, 0); }).finally(()=>{ ov.remove(); }); }
+function playBestProbe(){ if(!curSources.length) return toast('还没有可播的源'); const cands=curSources.map(s=>({source:s.source, source_name:s.source_name, url:(s.episodes||[])[0]})).filter(c=>c.url); if(!cands.length) return toast('这些源都没有集数'); const ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px'; ov.textContent='正在测速 '+cands.length+' 个源…'; document.body.appendChild(ov); api('/api/play/best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({candidates:cands})}).then(d=>{ const res=d.results||[]; res.forEach(r=>{ if(r.speed_kbs) curSpeed[r.source]={speed_kbs:r.speed_kbs, resolution:r.resolution||'', latency_ms:r.latency_ms, score:r.score}; }); sortByScore(); renderDetailSrc(0); const best=res.find(r=>r.ok); const ep=(cur&&cur.title===curSources[0].title)?cur.index:0; if(best){ toast('优选：'+best.source_name+'（'+(best.speed_kbs/1024).toFixed(2)+' MB/s）'); } else { toast('测速都超时了，先播第一个源，失败会自动换源'); } playSrc(0, ep); }).catch(e=>{ toast('测速失败：'+e.message+'，改播第一个源'); playSrc(0, 0); }).finally(()=>{ ov.remove(); }); }
 function directPlay(title){
   const reuse=(curDetailTitle===title&&curSources.length>0);
   const savedSources=reuse?curSources:null, savedSpeed=reuse?curSpeed:null;
@@ -332,8 +332,8 @@ function directPlay(title){
     api('/api/play/best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({candidates:cands})}).then(d=>{
       if(mySeq!==dpSeq) return;
       const res=d.results||[];
-      res.forEach(r=>{ if(r.speed_kbs) curSpeed[r.source]={speed_kbs:r.speed_kbs, resolution:r.resolution||''}; });
-      sortBySpeed(); renderPlayerTabs();
+      res.forEach(r=>{ if(r.speed_kbs) curSpeed[r.source]={speed_kbs:r.speed_kbs, resolution:r.resolution||'', latency_ms:r.latency_ms, score:r.score}; });
+      sortByScore(); renderPlayerTabs();
       const best=res.find(r=>r.ok);
       played=true; ov.remove();
       if(best){ toast('优选：'+best.source_name+'（'+(best.speed_kbs/1024).toFixed(2)+' MB/s）'); }
@@ -359,7 +359,7 @@ function directPlay(title){
       return;
     }
     if(d.type==='speed'){
-      curSpeed[d.source]={speed_kbs:d.speed_kbs, resolution:d.resolution};
+      curSpeed[d.source]={speed_kbs:d.speed_kbs, resolution:d.resolution, latency_ms:d.latency_ms, score:d.score};
       if(played) renderPlayerTabs();
       return;
     }
