@@ -88,6 +88,14 @@ web/             网页端（单页 index.html）
 
 本项目仍在开发中，默认凭据只是开箱即用的占位：**自己部署时请先改 `HOME_MEDIA_SECRET` 和管理员密码**，且不要把服务直接暴露到公网。电视端 ExoPlayer 不带 Cookie，因此 `/api/proxy/m3u8` 与 `/api/proxy/segment` 目前**既没有登录鉴权，也没有内网地址过滤**（内网过滤只在海报代理里做了），可被用来请求任意 URL。部署时请放在内网或可信反代之后，不要暴露到公网。
 
+## 来源
+
+服务端代码是原创的（不是 LunaTV 的 fork），但在设计上与 LunaTV 兼容：
+
+- 电视端接口按 Selene-TV 实际调用的 `ApiService` 契约实现（Cookie 鉴权、搜索、播放记录、收藏、直播源），这样电视端不用换、老人无感切换——接口兼容是逆向电视端实际请求抽出来的，不是抄 LunaTV 的服务端代码。
+- 网页端的布局参考了 LunaTV 的配置页样式（视频源、直播源等）。
+- 电视端应用本身是 Selene-TV 的 fork，见 [doge2mars/HomeMedia-TV](https://github.com/doge2mars/HomeMedia-TV)。
+
 ## 许可
 
 自用项目，暂未定许可。
