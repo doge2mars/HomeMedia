@@ -669,9 +669,9 @@ func rewriteM3U8(content, base string) string {
 }
 
 // 分享页解析：部分源（如电影天堂）给的不是直链 m3u8，而是一个 /share/ 落地页（HTML），
-// 真链藏在页面的 const url = "...m3u8..." 里。直接把 HTML 透传给播放器必播不了，
+// 真链藏在页面的 const/var/let url = "...m3u8..."（单双引号都可能） 里。直接把 HTML 透传给播放器必播不了，
 // 这里解析出真链返回；解析不到返回 ""。
-var shareM3U8Re = regexp.MustCompile(`const url\s*=\s*"([^"]*\.m3u8[^"]*)"`)
+var shareM3U8Re = regexp.MustCompile(`(?:const|var|let)\s+url\s*=\s*['"]([^'"]*\.m3u8[^'"]*)['"]`)
 
 func extractShareM3U8(html, pageURL string) string {
 	m := shareM3U8Re.FindStringSubmatch(html)

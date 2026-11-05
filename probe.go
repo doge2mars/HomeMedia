@@ -90,8 +90,12 @@ func handlePlayBest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"results": out})
 }
 
-// probePlayURL：取 m3u8 → 跟第一个变体（master 列表时）→ 下完整首分片算速度。
-// 只有“完整下完 + 不是错误页 + 长度对得上”的分片才进分片缓存；超时/截断一律丢弃，绝不把半截写进缓存。
+// 测速只读首分片前 5MB（足够算速度）；完整拉取 4K 大分片会占满家庭宽带。
+const probeSegmentMaxBytes = 5 << 20
+
+// probePlayURL：取 m3u8 → 跟第一个变体（master 列表时）→ 只读首分片前 5MB 算速度。
+// 只有“完整下完 + 不是错误页 + 长度对得上”的分片才进分片缓存；超时/截断/被 5MB 上限截断的
+// 一律不进缓存，绝不把半截写进缓存。
 func probePlayURL(ctx context.Context, raw string) (float64, string, error) {
 	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -193,11 +197,15 @@ func probePlayURL(ctx context.Context, raw string) (float64, string, error) {
 	if resp3.StatusCode != 200 {
 		return 0, res, fmt.Errorf("upstream %d", resp3.StatusCode)
 	}
-	seg, err := io.ReadAll(io.LimitReader(resp3.Body, maxSegmentBytes))
+	seg, err := io.ReadAll(io.LimitReader(resp3.Body, probeSegmentMaxBytes))
 	if err != nil {
 		return 0, res, err
 	}
-	if cl := resp3.ContentLength; cl > 0 && int64(len(seg)) != cl {
+	// 测速只读前 5MB：4K 高码率分片常 20–30MB，完整拉取会瞬时占满家庭宽带
+	// （5 源并发可达上百 MB）；5MB 样本已足够算出稳定速度。被上限截断的
+	// 分片不是“截断”，只用来算速度，绝不进分片缓存。
+	capped := int64(len(seg)) == probeSegmentMaxBytes && resp3.ContentLength != probeSegmentMaxBytes
+	if cl := resp3.ContentLength; cl > 0 && !capped && int64(len(seg)) != cl {
 		return 0, res, fmt.Errorf("truncated segment")
 	}
 	if looksLikeErrorPage(seg) {
@@ -207,8 +215,10 @@ func probePlayURL(ctx context.Context, raw string) (float64, string, error) {
 	if elapsed <= 0 {
 		elapsed = 0.001
 	}
-	// 完整分片落盘：播放时同一分片命中磁盘缓存，从局域网起手
-	_ = cacheSegmentBytes(segURL, seg)
+	if !capped {
+		// 完整分片落盘：播放时同一分片命中磁盘缓存，从局域网起手
+		_ = cacheSegmentBytes(segURL, seg)
+	}
 	return float64(len(seg)) / 1024 / elapsed, res, nil
 }
 
