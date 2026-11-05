@@ -110,6 +110,30 @@ func probePlayURL(ctx context.Context, raw string) (float64, string, error) {
 		return 0, "", err
 	}
 	text := string(body)
+	// 分享页：候选地址是 HTML 落地页时，先取出真 m3u8 再走正常探测；
+	// 取不到真链时直接判负，别把 HTML 行当成分片地址去取。
+	if !strings.Contains(text, "#EXTM3U") {
+		if real := extractShareM3U8(text, raw); real != "" {
+			raw = real
+			reqS, _ := http.NewRequestWithContext(ctx2, "GET", raw, nil)
+			reqS.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
+			respS, err := httpClient.Do(reqS)
+			if err != nil {
+				return 0, "", err
+			}
+			defer respS.Body.Close()
+			if respS.StatusCode != 200 {
+				return 0, "", fmt.Errorf("upstream %d", respS.StatusCode)
+			}
+			bS, err := io.ReadAll(io.LimitReader(respS.Body, 2<<20))
+			if err != nil {
+				return 0, "", err
+			}
+			text = string(bS)
+		} else {
+			return 0, "", fmt.Errorf("not a playlist")
+		}
+	}
 	res := ""
 	if strings.Contains(text, "#EXT-X-STREAM-INF") {
 		// master 列表：显示用最大分辨率，实测跟第一个变体（与 speedTestSource 同款做法）
@@ -224,3 +248,4 @@ func cacheSegmentBytes(segURL string, seg []byte) error {
 	}
 	return os.Rename(tmpName, cachePath)
 }
+

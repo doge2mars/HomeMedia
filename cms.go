@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
@@ -213,19 +214,40 @@ func handleSearchWS(w http.ResponseWriter, r *http.Request) {
 	srcs := listSources()
 	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "start", "totalSources": len(srcs)}))
 	fl.Flush()
+	// 并发搜各源（并发 8，单源 10 秒 ctx 超时）：原逐源顺序会把慢源耗时全串起来——
+	// 7 个 15 秒超时的源就能让整条 SSE 拖 3 分钟，详情页一直载入；并发后总耗时≈最慢源，
+	// 且结果随到随推，客户端不用等全部。事件形状不变，客户端无需改动。
+	type wsRes struct {
+		key, name string
+		items     []SearchItem
+		err       error
+	}
+	ch := make(chan wsRes, len(srcs))
+	sem := make(chan struct{}, 8)
 	for _, s := range srcs {
-		items, err := searchSource(s, q)
-		if err != nil {
-			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "source_error", "source": s.Key, "sourceName": s.Name, "error": err.Error()}))
+		s := s
+		go func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			items, err := searchSourceCtx(ctx, s, q)
+			ch <- wsRes{key: s.Key, name: s.Name, items: items, err: err}
+		}()
+	}
+	for range srcs {
+		r := <-ch
+		if r.err != nil {
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "source_error", "source": r.key, "sourceName": r.name, "error": r.err.Error()}))
 			fl.Flush()
 			continue
 		}
 		// 转成 电视端 SearchResult 形状
 		res := []map[string]any{}
-		for _, it := range items {
+		for _, it := range r.items {
 			res = append(res, map[string]any{"id": it.ID, "title": it.Title, "poster": it.Poster, "episodes": it.Episodes, "source": it.Source, "source_name": it.SourceName, "year": it.Year, "type_name": it.TypeName})
 		}
-		fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "source_result", "source": s.Key, "sourceName": s.Name, "results": res}))
+		fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "source_result", "source": r.key, "sourceName": r.name, "results": res}))
 		fl.Flush()
 	}
 	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "complete"}))
@@ -595,6 +617,32 @@ func rewriteM3U8(content, base string) string {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		trim := strings.TrimSpace(line)
+		// #EXT-X-KEY / #EXT-X-MAP 行里的 URI 也要改写，否则播放器按代理地址解析出
+		// 服务端根路径下的 404（密钥/初始化段落在服务端不存在）。密钥与 map 都是字节流，走 segment 代理。
+		if strings.HasPrefix(trim, "#EXT-X-KEY:") || strings.HasPrefix(trim, "#EXT-X-MAP:") {
+			if si := strings.Index(trim, `URI="`); si >= 0 {
+				rest := trim[si+5:]
+				if ei := strings.Index(rest, `"`); ei >= 0 {
+					rawURI := rest[:ei]
+					var absURI string
+					if strings.HasPrefix(rawURI, "http") {
+						absURI = rawURI
+					} else if b, err := url.Parse(base); err == nil {
+						if u, err := b.Parse(rawURI); err == nil {
+							absURI = u.String()
+						}
+					}
+					if absURI != "" {
+						proxy := "/api/proxy/segment?url=" + url.QueryEscape(absURI)
+						if strings.HasSuffix(absURI, ".m3u8") {
+							proxy = "/api/proxy/m3u8?url=" + url.QueryEscape(absURI)
+						}
+						lines[i] = strings.Replace(line, `URI="`+rawURI+`"`, `URI="`+proxy+`"`, 1)
+					}
+				}
+			}
+			continue
+		}
 		if trim == "" || strings.HasPrefix(trim, "#") {
 			continue
 		}
@@ -618,6 +666,27 @@ func rewriteM3U8(content, base string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// 分享页解析：部分源（如电影天堂）给的不是直链 m3u8，而是一个 /share/ 落地页（HTML），
+// 真链藏在页面的 const url = "...m3u8..." 里。直接把 HTML 透传给播放器必播不了，
+// 这里解析出真链返回；解析不到返回 ""。
+var shareM3U8Re = regexp.MustCompile(`const url\s*=\s*"([^"]*\.m3u8[^"]*)"`)
+
+func extractShareM3U8(html, pageURL string) string {
+	m := shareM3U8Re.FindStringSubmatch(html)
+	if m == nil {
+		return ""
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return ""
+	}
+	u, err := base.Parse(m[1])
+	if err != nil {
+		return ""
+	}
+	return u.String()
 }
 
 func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
@@ -651,6 +720,34 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	ct := resp.Header.Get("Content-Type")
+	// 分享页解析：上游返回 HTML 落地页时，从中取出真 m3u8 再拉一次；
+	// 取不到真链、或重拉仍是 HTML 时直接 502（HTML 透传给播放器只会让它空耗到退出）。
+	if strings.Contains(ct, "text/html") {
+		real := extractShareM3U8(string(body), raw)
+		if real == "" {
+			writeJSON(w, 502, map[string]string{"error": "share page without m3u8"})
+			return
+		}
+		req2, _ := http.NewRequest("GET", real, nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
+		resp2, err := httpClient.Do(req2)
+		if err != nil {
+			writeJSON(w, 502, map[string]string{"error": err.Error()})
+			return
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode < 200 || resp2.StatusCode >= 300 {
+			writeJSON(w, 502, map[string]string{"error": fmt.Sprintf("upstream status %d", resp2.StatusCode)})
+			return
+		}
+		body, _ = io.ReadAll(io.LimitReader(resp2.Body, 10<<20))
+		ct = resp2.Header.Get("Content-Type")
+		if strings.Contains(ct, "text/html") {
+			writeJSON(w, 502, map[string]string{"error": "share page without m3u8"})
+			return
+		}
+		raw = real
+	}
 	if strings.Contains(ct, "mpegurl") || strings.Contains(raw, ".m3u8") {
 		out := rewriteM3U8(filterAdsFromM3U8(string(body)), raw)
 		if strings.Contains(out, "#EXT-X-ENDLIST") {
