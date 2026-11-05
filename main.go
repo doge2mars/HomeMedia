@@ -51,6 +51,8 @@ func main() {
 	}
 	seed()
 	go syncSchedulerLoop()
+	// 启动时也预取一遍当季海报：磁盘缓存还在，命中就是瞬回；服务常重启，重启后首页不再冷启动
+	go prefetchCatalogPosters()
 
 	mux := http.NewServeMux()
 	exe, err := os.Executable()

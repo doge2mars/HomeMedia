@@ -19,7 +19,7 @@ import (
 // 只给豆瓣/Bangumi/manmankan 走这条路，源站海报它也是直连；
 // HomeMedia 网页端把全部海报都走这里，电视端源站海报
 // 因 APK 的 getImageUrlSync 只改写 doubanio/bgm.tv，改不了——见 README。
-// 安全：只放行 http/https、只转发 image/*、挡内网 IP（SSRF），单图 ≤10MB，15s 超时。
+// 安全：只放行 http/https、只转发 image/*、挡内网 IP（SSRF），单图 ≤10MB，直连 5s 超时、代理重试各 5s。
 func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
@@ -31,6 +31,12 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "bad url"})
 		return
 	}
+	// 缓存命中直接回，跳过 DNS 私有性检查：热点海报每次请求都查一次 DNS 是白白的延迟，
+	// 只有缓存未命中、真要出网抓时才需要这道检查。
+	if body, ct, ok := imageCacheLookup(raw); ok {
+		serveImage(w, body, ct)
+		return
+	}
 	if isPrivateHost(u.Hostname()) {
 		writeJSON(w, 403, map[string]string{"error": "private host blocked"})
 		return
@@ -40,6 +46,27 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 502, map[string]string{"error": err.Error()})
 		return
 	}
+	serveImage(w, body, ct)
+}
+
+// imageCacheLookup：只读磁盘缓存，命中返回 (body, ct, true)；未命中返回 ok=false，不写盘。
+func imageCacheLookup(raw string) ([]byte, string, bool) {
+	dataDir := getenv("HOME_MEDIA_DATA", "/opt/home-media/data")
+	cacheDir := filepath.Join(dataDir, "image-cache")
+	sum := sha256.Sum256([]byte(raw))
+	key := hex.EncodeToString(sum[:])
+	b, err := os.ReadFile(filepath.Join(cacheDir, key+".bin"))
+	if err != nil {
+		return nil, "", false
+	}
+	ct, err := os.ReadFile(filepath.Join(cacheDir, key+".meta"))
+	if err != nil {
+		return nil, "", false
+	}
+	return b, strings.TrimSpace(string(ct)), true
+}
+
+func serveImage(w http.ResponseWriter, body []byte, ct string) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -122,6 +149,9 @@ func fetchAndCache(raw string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	if b, ct, ok := imageCacheLookup(raw); ok {
+		return b, ct, nil
+	}
 	dataDir := getenv("HOME_MEDIA_DATA", "/opt/home-media/data")
 	cacheDir := filepath.Join(dataDir, "image-cache")
 	_ = os.MkdirAll(cacheDir, 0o755)
@@ -129,15 +159,12 @@ func fetchAndCache(raw string) ([]byte, string, error) {
 	key := hex.EncodeToString(sum[:])
 	bodyPath := filepath.Join(cacheDir, key+".bin")
 	metaPath := filepath.Join(cacheDir, key+".meta")
-	if b, err := os.ReadFile(bodyPath); err == nil {
-		if ct, err := os.ReadFile(metaPath); err == nil {
-			return b, strings.TrimSpace(string(ct)), nil
-		}
-	}
-	body, ct, err := fetchImageOnce(raw, "", 15*time.Second)
+	// 死图封顶从 25 秒压到 10 秒：直连 5 秒没回就判负走代理，代理各 5 秒；
+	// 以前直连 15 秒 + 代理 10 秒，一张慢图能堵住浏览器同 host 的 6 连接队列里的一整排。
+	body, ct, err := fetchImageOnce(raw, "", 5*time.Second)
 	if err != nil {
 		for _, px := range getImageProxies() {
-			if body, ct, err = fetchImageOnce(raw, px, 10*time.Second); err == nil {
+			if body, ct, err = fetchImageOnce(raw, px, 5*time.Second); err == nil {
 				break
 			}
 		}
@@ -150,22 +177,42 @@ func fetchAndCache(raw string) ([]byte, string, error) {
 	return body, ct, nil
 }
 
-// prefetchCatalogPosters：目录同步完成后后台预取海报（并发 4），让货架第一次打开就是热缓存
+// prefetchCatalogPosters：目录同步完成 / 服务启动后后台预取海报（并发 8），让常逛的页面是热缓存。
+// 按分类各取最新 150 张（ORDER BY updated_at DESC）：以前无序取前 300 张，暖到的常是旧数据，
+// 用户实际逛的分类首页和首页行反而是冷的。去重后总量约千张，后台跑，不阻塞任何请求。
 func prefetchCatalogPosters() {
-	rows, err := db.Query(`SELECT DISTINCT poster FROM catalog WHERE poster LIKE 'http%' LIMIT 300`)
+	if db == nil {
+		return
+	}
+	kinds, err := db.Query(`SELECT DISTINCT kind FROM catalog WHERE kind != ''`)
 	if err != nil {
 		return
 	}
-	defer rows.Close()
-	var urls []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err == nil && p != "" {
-			urls = append(urls, p)
+	var kindList []string
+	for kinds.Next() {
+		var k string
+		if err := kinds.Scan(&k); err == nil && k != "" {
+			kindList = append(kindList, k)
 		}
 	}
-	rows.Close()
-	sem := make(chan struct{}, 4)
+	kinds.Close()
+	seen := map[string]bool{}
+	var urls []string
+	for _, k := range kindList {
+		rows, err := db.Query(`SELECT poster FROM catalog WHERE kind = ? AND poster LIKE 'http%' ORDER BY updated_at DESC LIMIT 150`, k)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err == nil && p != "" && !seen[p] {
+				seen[p] = true
+				urls = append(urls, p)
+			}
+		}
+		rows.Close()
+	}
+	sem := make(chan struct{}, 8)
 	for _, u := range urls {
 		sem <- struct{}{}
 		go func(raw string) {
@@ -173,7 +220,7 @@ func prefetchCatalogPosters() {
 			_, _, _ = fetchAndCache(raw)
 		}(u)
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 8; i++ {
 		sem <- struct{}{}
 	}
 }
