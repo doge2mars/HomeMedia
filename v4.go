@@ -202,7 +202,7 @@ func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 测速：取一集 m3u8（优先第 2 集，更具代表性，Selene-TV 同款思路），
+// 测速：取一集 m3u8（优先第 2 集，更具代表性，同款思路），
 // 解析 master 播放列表的最高分辨率，下载首个分片一部分算速度；8 秒超时，失败不淘汰该源
 func speedTestSource(ctx context.Context, episodes []string) (float64, string, error) {
 	if len(episodes) == 0 {

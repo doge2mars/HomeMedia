@@ -14,11 +14,13 @@ func base64Decode(s string) ([]byte, error) {
 	return base64.RawStdEncoding.DecodeString(s)
 }
 
-// Base58（Bitcoin 字母表，与 LunaTV 用的 bs58 库一致）
-// LunaTV 订阅的真实格式（源码实测，cron/route.ts 与 config_subscription/fetch/route.ts 两处一致）：
-//   fetch(url) -> response.text() -> bs58.decode(text) -> TextDecoder -> JSON.parse
-// 也就是订阅内容本身就是 Base58 编码后的 LunaTV 配置 JSON，不是明文 JSON。
-// HomeMedia v0.3 只试了明文 JSON，所以 LunaTV 订阅必然报 no sources parsed——这是我的错，不是用户贴错地址。
+// Base58（Bitcoin 字母表，与 bs58 库一致）
+// 订阅的真实格式（源码实测，cron/route.ts 与 config_subscription/fetch/route.ts 两处一致）：
+//
+//	fetch(url) -> response.text() -> bs58.decode(text) -> TextDecoder -> JSON.parse
+//
+// 也就是订阅内容本身就是 Base58 编码后的 配置 JSON，不是明文 JSON。
+// HomeMedia v0.3 只试了明文 JSON，所以 这类订阅必然报 no sources parsed——这是我的错，不是用户贴错地址。
 const base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 func base58Decode(s string) ([]byte, error) {

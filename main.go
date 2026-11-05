@@ -1,7 +1,7 @@
 // HomeMedia v0.1 — 自研家庭影音原型：Go + SQLite 单进程
 // 设计约束（2026-11-04 定案）：
 //   - 目录库只囤元数据，不囤播放链接；点开才即时搜源拿新鲜集数/m3u8
-//   - 多用户独立播放记录/收藏；电视端 Selene-TV 契约优先（见 README）
+//   - 多用户独立播放记录/收藏；电视端契约优先（见 README）
 //   - 去广告在服务端 m3u8 代理层做一次，电视 ExoPlayer 也受益
 //   - 网页端同样是完整观看面，不只是管理后台
 package main
@@ -44,6 +44,10 @@ func main() {
 	}
 	if err := initDB(); err != nil {
 		log.Fatal(err)
+	}
+	// 归类口径改过后，把历史错归类的 kind 一次性纠正（如喜剧片/剧情片曾被误判为剧集）
+	if n := backfillCatalogKinds(); n > 0 {
+		log.Printf("catalog kind backfill: %d rows reclassified", n)
 	}
 	seed()
 	go syncSchedulerLoop()
@@ -96,6 +100,9 @@ func main() {
 	mux.HandleFunc("/api/me", auth(handleMe))
 	mux.HandleFunc("/api/sources", auth(handleSourcesV2))
 	mux.HandleFunc("/api/sources/subscribe", auth(ownerOnly(handleSourceSubscribe)))
+	mux.HandleFunc("/api/subscriptions", auth(ownerOnly(handleSubscriptionsList)))
+	mux.HandleFunc("/api/subscriptions/update", auth(ownerOnly(handleSubscriptionUpdate)))
+	mux.HandleFunc("/api/subscriptions/delete", auth(ownerOnly(handleSubscriptionDelete)))
 	mux.HandleFunc("/api/source/test", auth(handleSourceTest))
 	mux.HandleFunc("/api/detail-aggregate", auth(handleDetailAggregate))
 	mux.HandleFunc("/api/detail-aggregate-stream", auth(handleDetailAggregateStream))
@@ -144,6 +151,7 @@ func initDB() error {
 		`CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)`,
 		`CREATE TABLE IF NOT EXISTS cache(k TEXT PRIMARY KEY, v TEXT, expires_at INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS user_settings(username TEXT, k TEXT, v TEXT, PRIMARY KEY(username, k))`,
+		`CREATE TABLE IF NOT EXISTS subscriptions(url TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', created_at INTEGER, updated_at INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS upcoming(title TEXT, cover TEXT, type TEXT, release_date TEXT, genre TEXT, region TEXT, director TEXT, actors TEXT, source TEXT, updated_at INTEGER, PRIMARY KEY(title, release_date, type))`,
 		`CREATE TABLE IF NOT EXISTS wants(username TEXT, title TEXT, cover TEXT, year TEXT, source_name TEXT, release_date TEXT, save_time INTEGER, PRIMARY KEY(username, title))`,
 	}
@@ -154,6 +162,8 @@ func initDB() error {
 	}
 	// 老库迁移：kind 列不存在时补上（已存在则报错忽略），并回填空 kind
 	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN kind TEXT`)
+	// 订阅带来的源归属：sources.sub_url 记订阅地址，更新订阅时只替换它带来的源
+	_, _ = db.Exec(`ALTER TABLE sources ADD COLUMN sub_url TEXT`)
 	rows, err := db.Query(`SELECT title, year, type, genre FROM catalog WHERE kind IS NULL OR kind=''`)
 	if err == nil {
 		type row struct{ title, year, typ, genre string }
@@ -332,7 +342,7 @@ func handleSearchResources(w http.ResponseWriter, r *http.Request) {
 		rows.Scan(&k, &n, &a, &dis)
 		out = append(out, map[string]any{"key": k, "name": n, "api": a, "disabled": dis == 1})
 	}
-	// Selene-TV 期望：JSON 数组 [{key,name,api,...}]
+	// 电视端期望：JSON 数组 [{key,name,api,...}]
 	writeJSON(w, 200, out)
 }
 
@@ -354,7 +364,7 @@ func handleSources(w http.ResponseWriter, r *http.Request) {
 	handleSearchResources(w, r)
 }
 
-// ---- 播放记录：Selene-TV 契约 ----
+// ---- 播放记录：电视端契约 ----
 // GET  -> map["source+id"] = {title, source_name, year, cover, index, total_episodes, play_time, total_time, save_time, search_title}
 // POST -> {key, record:{...}} ；DELETE ?key=... 或无 key=清空
 func handlePlayRecords(w http.ResponseWriter, r *http.Request) {
@@ -518,7 +528,7 @@ func handleLiveSources(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, map[string]any{"key": k, "name": n, "url": u2, "ua": ua, "epg": epg, "from": "custom"})
 	}
-	// Selene-TV 期望：{data: [...]}
+	// 电视端期望：{data: [...]}
 	writeJSON(w, 200, map[string]any{"data": out})
 }
 
@@ -795,6 +805,8 @@ func syncSchedulerLoop() {
 		}
 		if runSyncIfFree(cfg) {
 			triggerUpcomingRefresh()
+			// 定时同步顺带刷新已保留的订阅（失败只记日志，不影响目录同步结果）
+			refreshAllSubscriptions()
 		}
 	}
 }

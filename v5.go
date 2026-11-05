@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// ---- 即将上映：慢看（manmankan，LunaTV 同款）+ TMDB 可选 ----
+// ---- 即将上映：慢看（manmankan，同款）+ TMDB 可选 ----
 
 type upcomingItem struct {
 	Title       string `json:"title"`
@@ -68,7 +68,7 @@ var (
 	reActorsDiv   = regexp.MustCompile(`<div class="dd-d2">主演：(.*?)</div>`)
 	reImgSrc      = regexp.MustCompile(`<img src="([^"]+)"`)
 	// 慢看是懒加载：真海报在 data-original，src 只是 loadimg.gif 占位图。
-	// LunaTV 解析器也是优先 data-original、 fallback src；只取 src 就会全是占位图。
+	// 解析器也是优先 data-original、 fallback src；只取 src 就会全是占位图。
 	reImgOriginal = regexp.MustCompile(`data-original="([^"]+)"`)
 	reTag         = regexp.MustCompile(`<[^>]+>`)
 )
@@ -76,7 +76,7 @@ var (
 func stripTags(s string) string { return strings.TrimSpace(reTag.ReplaceAllString(s, "")) }
 
 // 抓慢看时间表页：电影 https://g.manmankan.com/dy2013/dianying/shijianbiao/
-// 电视剧 https://g.manmankan.com/dy2013/dianshiju/shijianbiao/，结构与 LunaTV 解析器一致。
+// 电视剧 https://g.manmankan.com/dy2013/dianshiju/shijianbiao/，结构与 解析器一致。
 func scrapeManmankan(kind, url, typeName string) []upcomingItem {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

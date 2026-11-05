@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,9 +15,9 @@ import (
 	"time"
 )
 
-// /api/image-proxy?url=<图片地址> —— 借 LunaTV image-proxy 的机制，并扩展到所有海报
-// LunaTV 只给豆瓣/Bangumi/manmankan 走这条路，源站海报它也是直连；
-// HomeMedia 网页端把全部海报都走这里，电视端 Selene-TV 的源站海报
+// /api/image-proxy?url=<图片地址> —— 借 image-proxy 的机制，并扩展到所有海报
+// 只给豆瓣/Bangumi/manmankan 走这条路，源站海报它也是直连；
+// HomeMedia 网页端把全部海报都走这里，电视端源站海报
 // 因 APK 的 getImageUrlSync 只改写 doubanio/bgm.tv，改不了——见 README。
 // 安全：只放行 http/https、只转发 image/*、挡内网 IP（SSRF），单图 ≤10MB，15s 超时。
 func handleImageProxy(w http.ResponseWriter, r *http.Request) {

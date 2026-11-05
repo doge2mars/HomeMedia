@@ -25,7 +25,7 @@ section{margin:28px 0} h2{font-size:20px;font-weight:700;margin:14px 0 12px}
 .progressbar i{display:block;height:100%;background:var(--acc);border-radius:2px}
 .card img{width:100%;height:270px;object-fit:cover;background:#2a2a35;display:block}
 .card div{padding:10px 12px;font-size:14px} .card div div{padding:0} .card small{color:var(--mut)}
-/* v1.3 LunaTV 式问候横幅：蓝紫粉渐变，不是以前那个“最新入库”横幅 */
+/* v1.3 问候横幅：蓝紫粉渐变，不是以前那个“最新入库”横幅 */
 .greetbanner{display:flex;justify-content:space-between;align-items:center;gap:18px;background:linear-gradient(90deg,#4f46e5,#7c3aed,#db2777);border-radius:20px;padding:28px 32px;color:#fff}
 .greetbanner h2{font-size:24px;margin:0 0 6px}
 .greetbanner p{margin:0;color:rgba(255,255,255,0.85);font-size:14px}
@@ -39,7 +39,7 @@ video{width:100%;max-height:62vh;background:#000;border-radius:12px}
 table{width:100%;border-collapse:collapse;font-size:14px} td,th{padding:8px;border-bottom:1px solid var(--line);text-align:left}
 .hero{display:flex;gap:18px;flex-wrap:wrap} .hero img{width:200px;height:280px;object-fit:cover;border-radius:12px;background:#2a2a35}
 .view{display:none} .view.on{display:block}
-/* v0.5 LunaTV 式：横向滚动行（不是全展开的长网格），卡片固定宽 */
+/* v0.5 ：横向滚动行（不是全展开的长网格），卡片固定宽 */
 .row{display:flex;gap:18px;overflow-x:auto;padding-bottom:12px;scrollbar-width:none}
 .row::-webkit-scrollbar{display:none}
 .row .card{min-width:200px;max-width:200px;flex-shrink:0}
@@ -51,13 +51,13 @@ table{width:100%;border-collapse:collapse;font-size:14px} td,th{padding:8px;bord
 .navdot{display:inline-block;background:#ff3b30;color:#fff;font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;margin-left:4px}
 .wantbtn{margin-top:8px;width:100%;text-align:center}
 .rowhead button.arrow{background:#26262f;color:#fff;font-size:20px;font-weight:700;padding:6px 14px;border:1px solid var(--line);border-radius:8px}
-/* v0.9：箭头搬到行两侧、贴着视频，像 LunaTV/Netflix 那样悬在行边上 */
+/* v0.9：箭头搬到行两侧、贴着视频，像 Netflix 那样悬在行边上 */
 .rowwrap{position:relative}
 .sidearrow{position:absolute;top:50%;transform:translateY(-50%);z-index:5;width:44px;height:72px;background:rgba(0,0,0,0.65);color:#fff;font-size:26px;font-weight:700;border:1px solid rgba(255,255,255,0.2);border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0.9}
 .sidearrow.left{left:4px} .sidearrow.right{right:4px}
 .sidearrow:hover{background:rgba(255,90,60,0.85)}
 @media (hover:hover){ .sidearrow{opacity:0} .rowwrap:hover .sidearrow{opacity:0.9} }
-/* v1.1 LunaTV 式播放页：左播放器（3份）+ 右侧栏（1份，选集/换源标签页），窄屏自动上下叠 */
+/* v1.1 播放页：左播放器（3份）+ 右侧栏（1份，选集/换源标签页），窄屏自动上下叠 */
 .playlayout{display:flex;gap:16px;align-items:flex-start}
 .playmain{flex:3;min-width:0}
 .playside{flex:1;min-width:280px;max-width:360px;max-height:62vh;overflow-y:auto;background:var(--card);border-radius:12px;padding:12px;position:sticky;top:70px}
@@ -96,10 +96,10 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <div id="login" style="background:var(--card);padding:14px;border-radius:12px">
 <b>登录</b> <input id="u" placeholder="用户名" value="admin"> <input id="p" type="password" placeholder="密码" value="admin123">
 <button class="primary" onclick="doLogin()">登录</button> <button onclick="doRegister()">注册新用户</button>
-<span class="muted">原型默认 admin / admin123。电视端 Selene-TV 用同样地址 + 账号登录，服务器地址填 http://192.168.123.240:8090。</span>
+<span class="muted">原型默认 admin / admin123。电视端用同样地址 + 账号登录。</span>
 </div>
 
-<!-- 首页：全宽 LunaTV/Netflix 式布局 + 问候横幅（不是以前那个“最新入库”横幅） -->
+<!-- 首页：全宽 Netflix 式布局 + 问候横幅（不是以前那个“最新入库”横幅） -->
 <div id="view-home" class="view on">
 <section class="greetbanner"><div><h2 id="greetTitle">下午好</h2><p>发现更多精彩影视内容</p><div style="margin-top:14px"><button onclick="showView('shelf')">🌐 去货架逛逛</button> <button onclick="showView('fav')" style="margin-left:8px">👤 我的收藏</button></div></div><div class="greeticon">🎬</div></section>
 <section id="homeContinueSec"><div class="rowhead"><h2>▶ 继续观看</h2><span><button onclick="showView('fav')">查看更多 ▸</button></span></div><div class="rowwrap"><div id="continueGrid" class="row"><span class="muted">登录后显示</span></div><button class="sidearrow left" onclick="scrollRow('continueGrid',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('continueGrid',1)">&gt;</button></div></section>
@@ -109,7 +109,7 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 
 <!-- 货架：独立入口，不再塞在首页下面 -->
 <div id="view-shelf" class="view">
-<section><h2>货架 · 按条件筛选（不用先想剧名，点卡片直接开详情）</h2>
+<section><h2 id="shelfTitle">货架 · 按条件筛选</h2>
 
 <input id="fyear" list="yearList" placeholder="年份，如 2024" style="width:110px"><datalist id="yearList"></datalist>
 <input id="fgenre" list="genreList" placeholder="类型，如 古装/喜剧" style="width:150px"><datalist id="genreList"></datalist>
@@ -151,7 +151,7 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 
 <!-- 直播 -->
 <div id="view-live" class="view">
-<section><h2>直播</h2><div class="muted">直播不走去广告代理（和 LunaTV 直播页 filterAds=false 一致），直接播源站 m3u8。先在“设置 → 直播源”里加一个 M3U 地址。</div>
+<section><h2>直播</h2><div class="muted">直播不走去广告代理，直接播源站 m3u8。先在“设置 → 直播源”里加一个 M3U 地址。</div>
 <div id="liveGroups" style="margin-top:12px"></div><div id="liveChannels"></div></section>
 </div>
 
@@ -181,10 +181,10 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <label style="margin-left:12px"><input type="checkbox" id="chkHomeUpcoming" checked> 即将上映</label>
 <button class="primary" onclick="saveHomeSections()" style="margin-left:12px">保存板块设置</button></div>
 </details>
-<details><summary>视频源（苹果 CMS）<span id="srcSummary"></span></summary><div class="muted">单个添加：key + 名称 + api 地址（形如 https://xxx/api.php/provide/vod/）。电视端 Selene-TV 的搜索资源列表就是从这里来的，改完电视端不用改 APK。源管理仅站长（owner）可改，普通用户只能看、只能用。</div>
+<details><summary>视频源（苹果 CMS）<span id="srcSummary"></span></summary><div class="muted">单个添加：key + 名称 + api 地址（形如 https://xxx/api.php/provide/vod/）。电视端的搜索资源列表就是从这里来的，改完电视端不用改 APK。源管理仅站长（owner）可改，普通用户只能看、只能用。</div>
 <table id="srcTable"></table>
 <div style="margin-top:10px"><input id="skey" placeholder="key，如 ffzy" style="width:110px"> <input id="sname" placeholder="名称" style="width:120px"> <input id="sapi" placeholder="api 地址" style="width:46%"> <button class="primary" onclick="addSource()">添加/更新源</button></div>
-<div style="margin-top:10px"><b>订阅导入（配置订阅）</b> <input id="subUrl" placeholder="订阅地址，返回 [{key,name,api}] 或 {apiSites:[...]} 或 {api_site:{...}}" style="width:58%"> <button class="primary" onclick="subscribeSources()">导入</button> <span id="subMsg" class="muted"></span><div class="muted">订阅地址可以是公开源列表，也可以是你放在 NAS/电视盒上的局域网地址；导入时按归一化 api 去重，已有相同 api 的源只更新名称、不重复建。</div></div>
+<div style="margin-top:10px"><b>订阅导入（配置订阅）</b> <input id="subUrl" placeholder="订阅地址，返回 [{key,name,api}] 或 {apiSites:[...]} 或 {api_site:{...}}" style="width:58%"> <button class="primary" onclick="subscribeSources()">导入</button> <span id="subMsg" class="muted"></span><div class="muted">订阅地址可以是公开源列表，也可以是你放在 NAS/电视盒上的局域网地址；导入时按归一化 api 去重，已有相同 api 的源只更新名称、不重复建。导入后地址会保留在下面列表里，可手动更新、删除；更新会替换该订阅带来的源；目录定时同步时也会顺带刷新订阅。</div><div id="subList" style="margin-top:8px"></div></div>
 <div style="margin-top:10px"><button class="primary" onclick="testAllSources()">一键测试全部源</button> <button onclick="dedupeSources()">源去重（按 api）</button> <button onclick="disableFailedSources()">禁用测试失败的源</button> <span id="testAllMsg" class="muted"></span></div>
 <div id="testAllTable" style="margin-top:10px"></div>
 </details>
@@ -246,7 +246,7 @@ const shelfTabFilters={};
 function tabFilterState(t){ if(!shelfTabFilters[t]) shelfTabFilters[t]={year:'',genre:'',region:''}; return shelfTabFilters[t]; }
 function saveShelfInputs(){ const s=tabFilterState(shelfType); s.year=document.getElementById('fyear').value; s.genre=document.getElementById('fgenre').value; s.region=document.getElementById('fregion').value; }
 function loadShelfInputs(){ const s=tabFilterState(shelfType); document.getElementById('fyear').value=s.year; document.getElementById('fgenre').value=s.genre; document.getElementById('fregion').value=s.region; }
-function markShelfTab(){ document.querySelectorAll('header nav button[data-cat]').forEach(b=>b.classList.toggle('on', b.dataset.cat===shelfType)); const sb=document.querySelector('header nav button[data-view="shelf"]'); if(sb) sb.classList.toggle('on', shelfType===''); }
+function markShelfTab(){ document.querySelectorAll('header nav button[data-cat]').forEach(b=>b.classList.toggle('on', b.dataset.cat===shelfType)); const sb=document.querySelector('header nav button[data-view="shelf"]'); if(sb) sb.classList.toggle('on', shelfType===''); const st=document.getElementById('shelfTitle'); if(st) st.textContent=shelfType?`${shelfType} · 按条件筛选`:'货架 · 按条件筛选'; }
 async function selectShelfTab(t){ saveShelfInputs(); shelfType=t; markShelfTab(); loadShelfInputs(); document.getElementById('catalog').innerHTML='<div class="muted">正在加载…</div>'; await loadShelfMeta(t); loadCatalog(); }
 function goNavCat(t){ showView('shelf'); selectShelfTab(t); }
 function goShelfAll(){ showView('shelf'); selectShelfTab(''); }
@@ -303,7 +303,7 @@ function playFastest(){ if(!curSources.length) return toast('还没有可播的�
 function renderDetailSrc(idx){ if(!curSources.length) return; curSrcIdx=idx; const s=curSources[idx]; const tabs=document.getElementById('detailSrcTabs'); if(!tabs) return; tabs.innerHTML=''; curSources.forEach((x,i)=>{ const b=document.createElement('button'); b.textContent=`${x.source_name}（${(x.episodes||[]).length}集）${speedLabel(x)}`; if(i===idx) b.className='on'; b.onclick=()=>renderDetailSrc(i); tabs.appendChild(b); }); const eps=document.getElementById('detailEps'); eps.innerHTML=''; if(!(s.episodes||[]).length){ eps.innerHTML='<div class="muted">这个源没有集数，换个源试试。</div>'; return; } s.episodes.forEach((url,i)=>{ const sp=document.createElement('span'); sp.className='ep'; sp.textContent='第'+(i+1)+'集'; sp.onclick=()=>playSrc(idx,i); eps.appendChild(sp); }); }
 let triedSources=[], endedHandled=false, userSpeed=1;
 async function loadUserSpeed(){ try{ const d=await api('/api/user-settings'); if(d.speed) userSpeed=parseFloat(d.speed)||1; }catch(e){} }
-// LunaTV 式换源保进度：换源前把当前时间存到 sessionStorage（键含新源+新id+集数），
+// 换源保进度：换源前把当前时间存到 sessionStorage（键含新源+新id+集数），
 // 新源就绪后优先读它（用完即删），其次是同集数的历史记录；新源集数不够时降到最后一集、丢弃临时进度。
 function captureTempProgress(newSource, newId, epIdx){ const v=document.getElementById('v'); const t=v?v.currentTime||0:0; if(t>1){ try{ sessionStorage.setItem(`temp_progress_${newSource}_${newId}_${epIdx}`, String(t)); }catch(e){} } return t; }
 function readTempProgress(source, id, epIdx){ try{ const k=`temp_progress_${source}_${id}_${epIdx}`; const v=sessionStorage.getItem(k); if(v){ sessionStorage.removeItem(k); const t=parseFloat(v); if(t>1) return t; } }catch(e){} return 0; }
@@ -312,7 +312,7 @@ function openLivePlay(name, url){ if(curES){ curES.close(); curES=null; } showVi
 function failover(){ if(!cur || !curSources.length) return false; const order=[...curSources].sort((a,b)=>{ const sa=curSpeed[a.source]?.speed_kbs||-1, sb=curSpeed[b.source]?.speed_kbs||-1; return sb-sa; }); for(const s of order){ if(!triedSources.includes(s.source)){ const idx=curSources.indexOf(s); const ep=Math.min(cur.index||0, (s.episodes||[]).length-1); if(ep>=0){ toast('当前源失败，已自动切换到：'+s.source_name+'（保持当前进度）'); playSrc(idx, ep, {keepTime:true}); return true; } } } return false; }
 function applyStartTime(v, startTime){ if(!startTime||startTime<=1) return; const seek=()=>{ if(v.duration&&startTime<v.duration-5){ v.currentTime=startTime; } }; v.addEventListener('loadedmetadata', seek, {once:true}); setTimeout(seek, 800); }
 function playUrl(rawUrl, isLive, startTime){ const v=document.getElementById('v'); const st=document.getElementById('pstatus'); st.textContent=startTime&&startTime>1?`正在加载…（从 ${Math.floor(startTime/60)}分${Math.floor(startTime%60)}秒继续）`:'正在加载…'; if(hls){ hls.destroy(); hls=null; } const url=isLive? rawUrl : '/api/proxy/m3u8?url='+encodeURIComponent(rawUrl); v.onerror=()=>{ if(!isLive && failover()) return; st.textContent='播放失败：所有源都打不开，点上方“播放源”手动换一个试试。'; toast('播放失败，所有源都试过了'); }; if(rawUrl.includes('.m3u8') && window.Hls && Hls.isSupported()){ hls=new Hls({enableWorker:true, maxBufferLength:30, maxMaxBufferLength:60}); hls.loadSource(url); hls.attachMedia(v); hls.on(Hls.Events.MANIFEST_PARSED, ()=>{ v.playbackRate=userSpeed; v.play().catch(()=>{}); st.textContent=''; applyStartTime(v, startTime); }); hls.on(Hls.Events.ERROR, (e,d)=>{ if(d.fatal){ if(!isLive && failover()) return; st.textContent='播放失败：'+(d.details||'')+'，所有源都试过了。'; } }); } else { v.src=url; v.playbackRate=userSpeed; applyStartTime(v, startTime); v.play().catch(()=>{ if(!isLive && failover()) return; st.textContent='播放失败：浏览器无法直接播这个地址。'; }); } v.ontimeupdate=()=>{ if(!isLive && cur && v.currentTime>5){ if(!v._lastSave || v.currentTime-v._lastSave>15){ v._lastSave=v.currentTime; saveRecord(); } } }; v.onpause=()=>{ if(!isLive) saveRecord(); }; v.onended=()=>{ if(isLive||!cur||endedHandled) return; const s=curSources[curSrcIdx]; if(s&&cur.index+1<s.episodes.length){ endedHandled=true; toast('本集播完，1 秒后自动播下一集'); setTimeout(()=>playSrc(curSrcIdx, cur.index+1), 1000); } }; }
-async function saveRecord(){ if(!cur) return; const v=document.getElementById('v'); // LunaTV 同款：离结尾不到 3 分钟不保存，避免“继续观看”从片尾开始
+async function saveRecord(){ if(!cur) return; const v=document.getElementById('v'); // 同款：离结尾不到 3 分钟不保存，避免“继续观看”从片尾开始
   if(v.duration&&v.duration-v.currentTime<180) return; const key=cur.source+'+'+cur.id; await fetch('/api/playrecords',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key, record:{title:cur.title, source_name:cur.source_name, cover:cur.cover, year:cur.year, index:cur.index||0, total_episodes:cur.total, play_time:Math.floor(v.currentTime), total_time:Math.floor(v.duration||0), save_time:Date.now(), search_title:cur.search_title}})}); }
 function nextEp(){ if(!cur) return; const s=curSources[curSrcIdx]; if(cur.index+1 < s.episodes.length) playSrc(curSrcIdx, cur.index+1); else toast('已经是最后一集'); }
 async function favCurrent(){ if(!cur) return; try{ await api('/api/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:cur.source+'+'+cur.id, favorite:{title:cur.title, source_name:cur.source_name, cover:cur.cover, year:cur.year, total_episodes:cur.total, save_time:Date.now(), origin:''}})}); document.getElementById('favmsg').textContent='已收藏'; toast('已收藏'); }catch(e){ toast(e.message); } }
@@ -323,7 +323,7 @@ async function deleteFavorite(key){ try{ await api('/api/favorites?key='+encodeU
 async function loadFav(){ try{ const d=await api('/api/favorites'); const el=document.getElementById('favGrid'); el.innerHTML=''; const keys=Object.keys(d); if(!keys.length) el.innerHTML='<span class="muted">暂无收藏</span>'; keys.forEach(key=>{ const rec=d[key]; const del=`<div><button class="wantbtn" onclick="event.stopPropagation();deleteFavorite('${key.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">✕ 取消收藏</button></div>`; el.appendChild(card(rec, ()=>openTitle(rec.title), del)); }); }catch(e){ toast(e.message); } }
 async function loadLive(){ try{ const d=await api('/api/live/sources'); const el=document.getElementById('liveGroups'); el.innerHTML=''; if(!d.data.length){ el.innerHTML='<span class="muted">还没有直播源，去设置里加一个 M3U 地址。</span>'; return; } d.data.forEach(s=>{ const b=document.createElement('button'); b.textContent=s.name; b.onclick=()=>loadChannels(s.key, s.name); el.appendChild(b); }); }catch(e){ toast(e.message); } }
 async function loadChannels(key, name, fresh){ try{ toast('正在解析直播频道：'+name+'…'); const d=await api('/api/live/channels?source='+encodeURIComponent(key)+(fresh?'&fresh=1':'')); const el=document.getElementById('liveChannels'); el.innerHTML=`<h3>${name}（共 ${d.total} 个频道）</h3><button onclick="loadChannels('${key}','${name}',true)">刷新频道（绕过 6 小时缓存）</button><p class="muted">频道按分组折叠，点组名展开，点频道进播放页。</p>`; (d.order||[]).forEach(g=>{ const det=document.createElement('details'); det.innerHTML=`<summary>${g}（${(d.groups[g]||[]).length} 个频道）</summary>`; const div=document.createElement('div'); (d.groups[g]||[]).forEach(ch=>{ const sp=document.createElement('span'); sp.className='ep'; sp.textContent=ch.name; sp.onclick=()=>openLivePlay(ch.name, ch.url); div.appendChild(sp); }); det.appendChild(div); el.appendChild(det); }); }catch(e){ toast('直播解析失败：'+e.message); } }
-async function loadSettings(){ try{ const srcs=await api('/api/sources'); document.getElementById('srcSummary').textContent=`（${srcs.length} 个，${srcs.filter(s=>s.disabled).length} 个禁用）`; const t=document.getElementById('srcTable'); t.innerHTML='<tr><th>key</th><th>名称</th><th>api</th><th>状态</th><th>操作</th></tr>'; srcs.forEach(s=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.key}</td><td>${s.name}</td><td style="word-break:break-all">${s.api}</td><td>${s.disabled?'已禁用':'启用'}</td><td><button onclick="testSource('${s.key}')">测速</button> <button onclick="toggleSource('${s.key}','${s.name}','${s.api}',${!s.disabled})">${s.disabled?'启用':'禁用'}</button> <button onclick="delSource('${s.key}')">删除</button> <span id="test-${s.key}" class="muted"></span></td>`; t.appendChild(tr); }); const live=await api('/api/live/sources'); document.getElementById('liveSummary').textContent=`（${(live.data||[]).length} 个）`; const lt=document.getElementById('liveTable'); lt.innerHTML='<tr><th>key</th><th>名称</th><th>url</th><th>操作</th></tr>'; (live.data||[]).forEach(s=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.key}</td><td>${s.name}</td><td style="word-break:break-all">${s.url}</td><td><button onclick="delLive('${s.key}')">删除</button></td>`; lt.appendChild(tr); }); }catch(e){ toast(e.message); } }
+async function loadSettings(){ try{ const srcs=await api('/api/sources'); document.getElementById('srcSummary').textContent=`（${srcs.length} 个，${srcs.filter(s=>s.disabled).length} 个禁用）`; const t=document.getElementById('srcTable'); t.innerHTML='<tr><th>key</th><th>名称</th><th>api</th><th>状态</th><th>操作</th></tr>'; srcs.forEach(s=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.key}</td><td>${s.name}</td><td style="word-break:break-all">${s.api}</td><td>${s.disabled?'已禁用':'启用'}</td><td><button onclick="testSource('${s.key}')">测速</button> <button onclick="toggleSource('${s.key}','${s.name}','${s.api}',${!s.disabled})">${s.disabled?'启用':'禁用'}</button> <button onclick="delSource('${s.key}')">删除</button> <span id="test-${s.key}" class="muted"></span></td>`; t.appendChild(tr); }); const live=await api('/api/live/sources'); document.getElementById('liveSummary').textContent=`（${(live.data||[]).length} 个）`; const lt=document.getElementById('liveTable'); lt.innerHTML='<tr><th>key</th><th>名称</th><th>url</th><th>操作</th></tr>'; (live.data||[]).forEach(s=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.key}</td><td>${s.name}</td><td style="word-break:break-all">${s.url}</td><td><button onclick="delLive('${s.key}')">删除</button></td>`; lt.appendChild(tr); }); loadSubs(); }catch(e){ toast(e.message); } }
 async function loadSyncConfig(){ try{ const d=await api('/api/sync-config'); document.getElementById('syncPages').value=d.config.pages||10; document.getElementById('syncAuto').checked=!!d.config.auto; document.getElementById('syncInterval').value=String(d.config.interval_hours||24); document.getElementById('syncDailyTime').value=d.config.daily_time||''; document.getElementById('syncSummary').textContent=`（${d.catalog_count} 条${d.running?'，同步进行中':''}）`; document.getElementById('syncMsg').textContent=d.last_sync?('上次同步：'+new Date(d.last_sync*1000).toLocaleString()):'还没同步过'; const srcs=await api('/api/sources'); const sel=new Set(d.config.sources||[]); const allChecked=!d.config.sources||!d.config.sources.length; const el=document.getElementById('syncSources'); el.innerHTML=''; srcs.filter(s=>!s.disabled).forEach(s=>{ const lab=document.createElement('label'); lab.style.marginRight='14px'; lab.innerHTML=`<input type="checkbox" value="${s.key}" ${allChecked||sel.has(s.key)?'checked':''}> ${s.name}`; el.appendChild(lab); }); }catch(e){} }
 function syncSelectAll(on){ document.querySelectorAll('#syncSources input').forEach(c=>c.checked=on); }
 async function saveSyncConfig(){ const keys=[...document.querySelectorAll('#syncSources input:checked')].map(c=>c.value); try{ await api('/api/sync-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pages:parseInt(document.getElementById('syncPages').value)||10, sources:keys, auto:document.getElementById('syncAuto').checked, interval_hours:parseInt(document.getElementById('syncInterval').value)||24, daily_time:document.getElementById('syncDailyTime').value||''})}); toast('同步设置已保存'); loadSyncConfig(); }catch(e){ toast(e.message); } }
@@ -335,6 +335,9 @@ async function testSource(k){ try{ const d=await api('/api/source/test?key='+enc
 async function addLive(){ try{ const key=document.getElementById('lkey').value, name=document.getElementById('lname').value, url=document.getElementById('lurl').value; if(!key||!url) return toast('key 和 M3U 地址不能为空'); await api('/api/live/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key, name:name||key, url})}); toast('直播源已保存'); loadSettings(); }catch(e){ toast(e.message); } }
 async function delLive(k){ try{ await api('/api/live/sources?key='+encodeURIComponent(k),{method:'DELETE'}); toast('已删除'); loadSettings(); }catch(e){ toast(e.message); } }
 async function subscribeSources(){ try{ const url=document.getElementById('subUrl').value; if(!url) return toast('先填订阅地址'); const d=await api('/api/sources/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}); document.getElementById('subMsg').textContent=`导入 ${d.imported} / ${d.total} 个源`; toast('订阅导入完成'); loadSettings(); }catch(e){ toast('订阅导入失败：'+e.message); } }
+async function loadSubs(){ try{ const d=await api('/api/subscriptions'); const el=document.getElementById('subList'); if(!el) return; const subs=d.subscriptions||[]; if(!subs.length){ el.innerHTML='<span class="muted">还没有保留的订阅，上面导入后会自动出现在这里。</span>'; return; } el.innerHTML='<table><tr><th>订阅地址</th><th>来源数</th><th>操作</th></tr>'+subs.map(s=>`<tr><td style="word-break:break-all">${s.url}</td><td>${s.count}</td><td><button onclick="updateSub('${encodeURIComponent(s.url)}')">更新</button> <button onclick="deleteSub('${encodeURIComponent(s.url)}')">删除</button></td></tr>`).join('')+'</table>'; }catch(e){} }
+async function updateSub(enc){ try{ const d=await api('/api/subscriptions/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:decodeURIComponent(enc)})}); toast(`订阅已更新：${d.imported}/${d.total} 个源`); loadSettings(); }catch(e){ toast('订阅更新失败：'+e.message); } }
+async function deleteSub(enc){ if(!confirm('删除该订阅及它带来的源？')) return; try{ const d=await api('/api/subscriptions/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:decodeURIComponent(enc)})}); toast(`已删除订阅，移除了 ${d.removed_sources} 个源`); loadSettings(); }catch(e){ toast('删除失败：'+e.message); } }
 async function subscribeLive(){ try{ const url=document.getElementById('liveSubUrl').value, name=document.getElementById('liveSubName').value; if(!url) return toast('先填直播订阅地址'); const d=await api('/api/live/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url, name})}); document.getElementById('liveSubMsg').textContent=`导入 ${d.imported} 个，格式 ${d.format}`; toast('直播订阅导入完成'); loadSettings(); }catch(e){ toast('直播订阅导入失败：'+e.message); } }
 async function loadUsers(){ try{ const d=await api('/api/users'); const t=document.getElementById('userTable'); t.innerHTML='<tr><th>用户名</th><th>角色</th><th>操作</th></tr>'; d.forEach(u=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${u.username}</td><td>${u.role}</td><td><button onclick="delUser('${u.username}')">删除</button></td>`; t.appendChild(tr); }); }catch(e){ document.getElementById('userTable').innerHTML='<tr><td class="muted">只有站长能看账户列表：'+e.message+'</td></tr>'; } }
 async function addUser(){ try{ const username=document.getElementById('nu').value, password=document.getElementById('np').value, role=document.getElementById('nrole').value; await api('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username, password, role})}); toast('账户已添加'); loadUsers(); }catch(e){ toast('添加账户失败：'+e.message); } }
@@ -347,7 +350,7 @@ let lastFailedKeys=[];
 async function testAllSources(){ try{ document.getElementById('testAllMsg').textContent='正在并行测试全部源…'; const d=await api('/api/sources/test-all',{method:'POST'}); lastFailedKeys=d.results.filter(r=>!r.ok).map(r=>r.key); const el=document.getElementById('testAllTable'); let html='<table><tr><th>源</th><th>结果</th><th>耗时</th><th>分类数</th><th>错误</th></tr>'; d.results.forEach(r=>{ html+=`<tr><td>${r.name}（${r.key}）</td><td>${r.ok?'✅ 可用':'❌ 失败'}</td><td>${r.ms}ms</td><td>${r.categories}</td><td>${r.error||''}</td></tr>`; }); html+='</table>'; el.innerHTML=html; document.getElementById('testAllMsg').textContent=`测完：${d.results.filter(r=>r.ok).length} 可用，${lastFailedKeys.length} 失败。失败不一定是源死了，也可能是当时网络抖一下，点“禁用失败源”前可以再测一次。`; }catch(e){ toast('测试全部源失败：'+e.message); } }
 async function dedupeSources(){ try{ const d=await api('/api/sources/dedupe',{method:'POST'}); toast(`去重完成，删了 ${d.count} 个重复源`); loadSettings(); }catch(e){ toast(e.message); } }
 async function disableFailedSources(){ if(!lastFailedKeys.length) return toast('先点“一键测试全部源”，再禁用失败的'); try{ const d=await api('/api/sources/disable-failed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keys:lastFailedKeys})}); toast(`已禁用 ${d.disabled} 个失败源`); loadSettings(); }catch(e){ toast(e.message); } }
-/* v1.4 即将上映 + 想看：LunaTV 式 reminders，提醒只算已上映且还没进播放记录的 */
+/* v1.4 即将上映 + 想看： reminders，提醒只算已上映且还没进播放记录的 */
 let upcomingItems=[], upcomingFilterVal='all', wantTitles=new Set();
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function releaseLabel(date){ if(!date) return '无上映日期'; const t=todayStr(); if(date===t) return '今日上映'; if(date<t){ const days=Math.floor((new Date(t)-new Date(date))/86400000); return '已上映'+days+'天'; } return date+'上映'; }
@@ -364,7 +367,7 @@ async function loadWants(){ try{ const d=await api('/api/wants'); const recs=awa
 async function deleteWant(title){ try{ await api('/api/wants?title='+encodeURIComponent(title),{method:'DELETE'}); loadWants(); loadWantBadge(); }catch(e){ toast(e.message); } }
 async function clearWants(){ try{ const d=await api('/api/wants'); for(const w of (d.items||[])){ await api('/api/wants?title='+encodeURIComponent(w.title),{method:'DELETE'}); } loadWants(); loadWantBadge(); toast('想看已清空'); }catch(e){ toast(e.message); } }
 async function loadWantBadge(){ try{ const d=await api('/api/wants'); const recs=await api('/api/playrecords').catch(()=>({})); const watched=new Set(); Object.values(recs||{}).forEach(r=>{ if(r.title) watched.add(r.title); if(r.search_title) watched.add(r.search_title); }); const t=todayStr(); const n=(d.items||[]).filter(w=>w.release_date && w.release_date<=t && !watched.has(w.title)).length; const btn=document.querySelector('header nav button[data-view="fav"]'); if(btn) btn.innerHTML=n>0?'👤 我的 <span class="navdot">'+n+'</span>':'👤 我的'; }catch(e){} }
-/* v1.5 整页上映日程：照 LunaTV /release-calendar 的逻辑——一次拉全量、前端筛类型/地区/题材/时间段/关键词，时间线按日期分组、网格分页不做（77 条全列） */
+/* v1.5 整页上映日程：一次拉全量、前端筛类型/地区/题材/时间段/关键词，时间线按日期分组、网格分页不做（77 条全列） */
 let upViewMode='timeline';
 function setUpView(m, btn){ upViewMode=m; document.getElementById('upViewTimeline').classList.toggle('on', m==='timeline'); document.getElementById('upViewGrid').classList.toggle('on', m==='grid'); renderUpcomingPage(); }
 async function loadUpcomingPage(){ try{ const d=await api('/api/upcoming'); upcomingItems=d.items||[]; try{ wantTitles=new Set(((await api('/api/wants')).items||[]).map(w=>w.title)); }catch(e){} const regs=new Set(), gens=new Set(); upcomingItems.forEach(it=>{ if(it.region) regs.add(it.region); (it.genre||'').split('/').forEach(g=>{ if(g) gens.add(g); }); }); const rs=document.getElementById('upFRegion'), gs=document.getElementById('upFGenre'); const curR=rs.value, curG=gs.value; rs.innerHTML='<option value="all">全部</option>'; [...regs].sort().forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; rs.appendChild(o); }); gs.innerHTML='<option value="all">全部</option>'; [...gens].sort().forEach(g=>{ const o=document.createElement('option'); o.value=g; o.textContent=g; gs.appendChild(o); }); if([...regs].includes(curR)) rs.value=curR; if([...gens].includes(curG)) gs.value=curG; renderUpcomingPage(); }catch(e){ document.getElementById('upPageMsg').textContent='上映数据拉取失败：'+e.message; } }
@@ -397,6 +400,9 @@ async function loadShelfMeta(type){
     (d.regions||[]).forEach(v=>{ const o=document.createElement('option'); o.value=v; rg.appendChild(o); });
   }catch(e){}
 }
-updateGreeting(); loadUserSpeed(); ['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{}); loadHome().catch(()=>{}); loadContinueInto('continueGrid').catch(()=>{}); loadUpcoming().catch(()=>{}); loadWantBadge().catch(()=>{});
+updateGreeting(); ['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{});
+// 开机先认已有的登录 Cookie：有效就直接进首页，不用每次刷新都重新登录；
+// 失效（401）才留着登录框等用户登录。
+(async()=>{ try{ const me=await api('/api/me'); document.getElementById('who').textContent='已登录：'+me.username; document.getElementById('login').style.display='none'; loadUserSpeed(); loadHome().catch(()=>{}); loadContinueInto('continueGrid').catch(()=>{}); loadUpcoming().catch(()=>{}); loadWantBadge().catch(()=>{}); }catch(e){} })();
 </script>
 </body></html>

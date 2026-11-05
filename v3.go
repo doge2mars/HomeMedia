@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -12,8 +13,8 @@ import (
 	"time"
 )
 
-// v0.3：LunaTV 式订阅导入 + 账户管理 + 服务端缓存 + 每用户设置
-// LunaTV 依据（rea-lab 源码实测）：
+// v0.3：订阅导入 + 账户管理 + 服务端缓存 + 每用户设置
+// 依据（rea-lab 源码实测）：
 //  - 配置订阅：admin/config_file 的 subscriptionUrl（ConfigSubscribtion.URL，支持 autoUpdate）
 //  - 直播导入导出：admin/live/import-export，data.sources
 //  - 直播格式检测（lib/live.ts）：TVBox JSON（lives 数组）或 TVBox TXT，另有 M3U
@@ -69,8 +70,8 @@ type subSource struct {
 	API  string `json:"api"`
 }
 
-// decodeSubscription：按 LunaTV 的真实链路解码，再做兼容
-// 顺序：明文 JSON -> Base58(JSON) -> Base64(JSON)，三者都试，LunaTV 订阅走第二步
+// decodeSubscription：按 真实链路解码，再做兼容
+// 顺序：明文 JSON -> Base58(JSON) -> Base64(JSON)，三者都试，Base58 订阅走第二步
 func decodeSubscription(body []byte) ([]byte, string, error) {
 	text := strings.TrimSpace(string(body))
 	if text == "" {
@@ -83,7 +84,7 @@ func decodeSubscription(body []byte) ([]byte, string, error) {
 	compact := regexp.MustCompile(`\s+`).ReplaceAllString(text, "")
 	if decoded, err := base58Decode(compact); err == nil {
 		if t := strings.TrimSpace(string(decoded)); strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") {
-			return decoded, "base58-json (LunaTV config)", nil
+			return decoded, "base58-json", nil
 		}
 	}
 	if decoded, err := base64StdDecode(compact); err == nil {
@@ -113,7 +114,7 @@ func parseSourceSubscription(body []byte) ([]subSource, []string, int) {
 			return
 		}
 		if k == "" {
-			// 没有 key 的源：按名称生成 key，LunaTV 之外的很多源列表就是只有 name+api
+			// 没有 key 的源：按名称生成 key，很多源列表就是只有 name+api
 			// 中文名经 sanitize 后会变空/只剩 "_"，那种情况改用序号 key，避免多个中文源撞成同一个 "_"
 			k = regexp.MustCompile(`[^a-zA-Z0-9_-]+`).ReplaceAllString(n, "_")
 			if strings.Trim(k, "_") == "" {
@@ -145,7 +146,7 @@ func parseSourceSubscription(body []byte) ([]subSource, []string, int) {
 			}
 		}
 	}
-	// LunaTV 配置文件格式：api_site: {key: {name, api, detail?}}，值也可能是纯字符串地址
+	// 配置文件格式：api_site: {key: {name, api, detail?}}，值也可能是纯字符串地址
 	if m, ok := obj["api_site"].(map[string]any); ok {
 		for k, v := range m {
 			if sm, ok := v.(map[string]any); ok {
@@ -212,10 +213,11 @@ func handleSourceSubscribe(w http.ResponseWriter, r *http.Request) {
 	deduped := 0
 	for _, s := range srcs {
 		if _, existed := dedupeOnSubscribe(s); existed {
+			// 已有相同 api 的源只更新名称，不改归属：它可能是手动加的或别的订阅带来的
 			deduped++
 			continue
 		}
-		if _, err := db.Exec(`INSERT OR REPLACE INTO sources(key, name, api, disabled) VALUES(?,?,?,0)`, s.Key, s.Name, s.API); err == nil {
+		if _, err := db.Exec(`INSERT OR REPLACE INTO sources(key, name, api, disabled, sub_url) VALUES(?,?,?,0,?)`, s.Key, s.Name, s.API, b.URL); err == nil {
 			n++
 		}
 	}
@@ -226,10 +228,130 @@ func handleSourceSubscribe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cacheDelPrefix("search:")
+	// 订阅地址本身存库：之后可在设置里手动更新、删除，定时同步时也会顺带刷新
+	saveSubscription(b.URL)
 	writeJSON(w, 200, map[string]any{"imported": n, "total": len(srcs), "deduped": deduped, "lives_imported": ln, "format": format, "skipped_no_api": skipped})
 }
 
-// ---- 直播订阅导入：M3U / TVBox TXT / TVBox JSON / LunaTV live import JSON ----
+// ---- 订阅保留：订阅地址本身存库，可手动/定时刷新；刷新只替换该订阅带来的源 ----
+
+func subNameOf(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return raw
+}
+
+func saveSubscription(raw string) {
+	now := time.Now().Unix()
+	_, _ = db.Exec(`INSERT INTO subscriptions(url, name, created_at, updated_at) VALUES(?,?,?,?) ON CONFLICT(url) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at`, raw, subNameOf(raw), now, now)
+}
+
+// refreshSubscription：重抓订阅并替换该订阅带来的源。抓取/解析失败时原样保留，不动旧源。
+func refreshSubscription(raw string) (imported, total int, err error) {
+	body, _, err := fetchSubscription(raw)
+	if err != nil {
+		return 0, 0, err
+	}
+	decoded, _, decErr := decodeSubscription(body)
+	if decErr != nil {
+		return 0, 0, decErr
+	}
+	srcs, _, _ := parseSourceSubscription(decoded)
+	if _, err := db.Exec(`DELETE FROM sources WHERE sub_url=?`, raw); err != nil {
+		return 0, 0, err
+	}
+	for _, s := range srcs {
+		if _, existed := dedupeOnSubscribe(s); existed {
+			continue
+		}
+		if _, err := db.Exec(`INSERT OR REPLACE INTO sources(key, name, api, disabled, sub_url) VALUES(?,?,?,0,?)`, s.Key, s.Name, s.API, raw); err == nil {
+			imported++
+		}
+	}
+	saveSubscription(raw)
+	cacheDelPrefix("search:")
+	return imported, len(srcs), nil
+}
+
+func refreshAllSubscriptions() {
+	rows, err := db.Query(`SELECT url FROM subscriptions`)
+	if err != nil {
+		return
+	}
+	var urls []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err == nil {
+			urls = append(urls, u)
+		}
+	}
+	rows.Close()
+	for _, u := range urls {
+		if n, total, err := refreshSubscription(u); err != nil {
+			log.Printf("subscription refresh failed %s: %v", u, err)
+		} else {
+			log.Printf("subscription refreshed %s: %d/%d", u, n, total)
+		}
+	}
+}
+
+func handleSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	rows, _ := db.Query(`SELECT s.url, s.name, s.updated_at, (SELECT COUNT(*) FROM sources WHERE sub_url=s.url) FROM subscriptions s ORDER BY s.updated_at DESC`)
+	out := []map[string]any{}
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var url, name string
+			var updated int64
+			var cnt int
+			if err := rows.Scan(&url, &name, &updated, &cnt); err == nil {
+				out = append(out, map[string]any{"url": url, "name": name, "updated_at": updated, "count": cnt})
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"subscriptions": out})
+}
+
+func handleSubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	var b struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.URL == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	n, total, err := refreshSubscription(b.URL)
+	if err != nil {
+		writeJSON(w, 502, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"imported": n, "total": total})
+}
+
+func handleSubscriptionDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	var b struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.URL == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	res, _ := db.Exec(`DELETE FROM sources WHERE sub_url=?`, b.URL)
+	removed, _ := res.RowsAffected()
+	_, _ = db.Exec(`DELETE FROM subscriptions WHERE url=?`, b.URL)
+	writeJSON(w, 200, map[string]any{"removed_sources": removed})
+}
+
+// ---- 直播订阅导入：M3U / TVBox TXT / TVBox JSON / live import JSON ----
 func handleLiveSubscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]string{"error": "method"})
@@ -255,7 +377,7 @@ func handleLiveSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	keyBase = regexp.MustCompile(`[^a-zA-Z0-9_-]+`).ReplaceAllString(keyBase, "_")
 	imported := 0
-	// A) TVBox JSON / LunaTV live import JSON
+	// A) TVBox JSON / live import JSON
 	var obj map[string]any
 	if json.Unmarshal(body, &obj) == nil {
 		var lives []any

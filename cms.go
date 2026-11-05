@@ -200,7 +200,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSearchWS(w http.ResponseWriter, r *http.Request) {
-	// Selene-TV 服务端聚合搜索（SSE）：type=start/source_result/source_error/complete
+	// 电视端服务端聚合搜索（SSE）：type=start/source_result/source_error/complete
 	defer func() { _ = recover() }() // 与 detail-aggregate-stream 同款防崩：流写死不拖全站
 	q := r.URL.Query().Get("q")
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -220,7 +220,7 @@ func handleSearchWS(w http.ResponseWriter, r *http.Request) {
 			fl.Flush()
 			continue
 		}
-		// 转成 Selene SearchResult 形状
+		// 转成 电视端 SearchResult 形状
 		res := []map[string]any{}
 		for _, it := range items {
 			res = append(res, map[string]any{"id": it.ID, "title": it.Title, "poster": it.Poster, "episodes": it.Episodes, "source": it.Source, "source_name": it.SourceName, "year": it.Year, "type_name": it.TypeName})
@@ -367,17 +367,53 @@ func kindOf(typ, genre string) string {
 		return "综艺"
 	case has("足球", "篮球", "斯诺克", "网球", "台球", "赛事", "西甲", "英超", "法甲", "意甲", "德甲", "NBA", "CBA", "WCBA", "LPL", "体育"):
 		return "体育"
-	case has("剧集"):
-		return "剧集"
-	case has("剧"):
+	// 电影片必须先于“剧”判断：喜剧片/剧情片/爱情片的 genre 里常带“剧情/喜剧”，
+	// 旧版先判“剧”子串会把几千部电影错归为剧集；片一律以 type 为准（片尾/电影字样）。
+	case strings.HasSuffix(typ, "片") || strings.Contains(typ, "电影") || typ == "伦理" || typ == "理论":
+		return "电影"
+	// 剧集只看 type 里的“剧”（电视剧/连续剧/国产剧/港台剧/日韩剧/欧美剧…），
+	// 不再看 genre——genre 里的“剧情/喜剧”是电影体裁，不是剧集。
+	case typ == "剧集" || strings.Contains(typ, "剧"):
 		return "剧集"
 	case has("现代都市", "古装仙侠", "言情总裁", "穿越年代", "脑洞悬疑", "家庭篇", "闪婚离婚", "都市脑洞", "现代言情", "女恋总裁", "穿越现代", "女频恋爱", "反转爽文", "成长逆袭", "年代穿越", "悬疑烧脑"):
 		return "剧集"
-	case has("片", "电影", "伦理", "理论"):
-		return "电影"
 	default:
 		return "其他"
 	}
+}
+
+// backfillCatalogKinds：用当前 kindOf 重算全库 kind，修正历史错归类（如喜剧片/剧情片
+// 曾被“剧”子串误判为剧集）。只更新不一致的行，幂等，启动时跑一次。
+func backfillCatalogKinds() int {
+	rows, err := db.Query(`SELECT title, year, type, genre, COALESCE(kind,'') FROM catalog`)
+	if err != nil {
+		return 0
+	}
+	type row struct{ title, year, typ, genre, kind string }
+	var todo []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.title, &r.year, &r.typ, &r.genre, &r.kind); err == nil {
+			todo = append(todo, r)
+		}
+	}
+	rows.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, r := range todo {
+		if nk := kindOf(r.typ, r.genre); nk != r.kind {
+			if _, err := tx.Exec(`UPDATE catalog SET kind=? WHERE title=? AND year=? AND type=?`, nk, r.title, r.year, r.typ); err == nil {
+				n++
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0
+	}
+	return n
 }
 
 func syncCatalogWith(cfg syncConfig) error {
