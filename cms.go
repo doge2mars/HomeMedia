@@ -413,11 +413,11 @@ func isSportsKind(typ, genre string) bool {
 	return false
 }
 
-// isAdultContent：源站细分类/题材是否成人内容（2026-11-06 清理）。
-// 与库里清理口径一致：type 含伦理/三级，或 type 恰为福利，或 genre 含成人/情色。
+// isAdultContent：源站细分类/题材是否成人内容（2026-11-06 清理，11-06 午扩展）。
+// 与库里清理口径一致：type 含伦理/三级/理论/里番/擦边/写真/两性，或 type 恰为福利，或 genre 含成人/情色。
 // 注意：genre 里的年份数字（如 2018）不是成人标记，不要按数字判。
 func isAdultContent(typ, genre string) bool {
-	if strings.Contains(typ, "伦理") || strings.Contains(typ, "三级") || typ == "福利" {
+	if strings.Contains(typ, "伦理") || strings.Contains(typ, "三级") || strings.Contains(typ, "理论") || strings.Contains(typ, "里番") || strings.Contains(typ, "擦边") || strings.Contains(typ, "写真") || strings.Contains(typ, "两性") || typ == "福利" {
 		return true
 	}
 	if strings.Contains(genre, "成人") || strings.Contains(genre, "情色") {
