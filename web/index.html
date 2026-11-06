@@ -123,7 +123,7 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <button class="catentry" onclick="openCat('短剧')"><b>⏯️</b>短剧</button>
 <button class="catentry" onclick="openCat('动漫')"><b>🐱</b>动漫</button>
 <button class="catentry" onclick="openCat('综艺')"><b>🍀</b>综艺</button>
-</div><div style="margin-top:10px"><button onclick="shuffleHome()">🎲 换一批</button> <span class="muted">随机挑 20 部高分或近 3 年的片子</span></div></section>
+</div></section>
 <section id="homeContinueSec"><div class="rowhead"><h2>▶ 继续观看</h2><span><button onclick="showView('fav')">查看更多 ▸</button></span></div><div class="rowwrap"><div id="continueGrid" class="row"><span class="muted">登录后显示</span></div><button class="sidearrow left" onclick="scrollRow('continueGrid',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('continueGrid',1)">&gt;</button></div></section>
 <section id="upcomingSec"><div class="rowhead"><h2>📅 即将上映</h2><span><button id="upFAll" class="on" onclick="upcomingFilter('all',this)">全部</button> <button id="upFMovie" onclick="upcomingFilter('电影片',this)">电影</button> <button id="upFTv" onclick="upcomingFilter('连续剧',this)">电视剧</button> <button onclick="refreshUpcoming(true)">刷新 ↻</button> <button onclick="showView('upcoming')">查看全部日程 ▸</button> <button onclick="showView('fav')">我的想看 ▸</button></span></div><div class="rowwrap"><div id="upcomingRow" class="row"><span class="muted">正在拉上映数据…</span></div><button class="sidearrow left" onclick="scrollRow('upcomingRow',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('upcomingRow',1)">&gt;</button></div><div id="upcomingMsg" class="muted"></div></section>
 <section><div id="homeRows"></div></section>
