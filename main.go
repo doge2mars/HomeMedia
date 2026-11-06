@@ -98,6 +98,7 @@ func main() {
 	mux.HandleFunc("/api/catalog/related", auth(handleCatalogRelated))
 	mux.HandleFunc("/api/trending-household", auth(handleTrendingHousehold))
 	mux.HandleFunc("/api/douban", auth(handleDouban))
+	mux.HandleFunc("/api/bangumi/calendar", auth(handleBangumiCalendar))
 	mux.HandleFunc("/api/douban-proxy", auth(handleDoubanProxyGet))
 	mux.HandleFunc("/api/douban-proxy/save", auth(ownerOnly(handleDoubanProxySave)))
 	mux.HandleFunc("/api/douban-proxy/test", auth(ownerOnly(handleDoubanProxyTest)))

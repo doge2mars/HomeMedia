@@ -66,10 +66,10 @@ func TestFetchDoubanList(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("got %d items, want 2 (empty title skipped)", len(items))
 	}
-	if items[0]["title"] != "测试电影" || items[0]["poster"] != "https://img.example.com/p1.jpg" || items[0]["rating"] != "8.5" || items[0]["year"] != "2026" || items[0]["type"] != "电影" {
+	if items[0]["title"] != "测试电影" || items[0]["poster"] != "https://img.example.com/p1.jpg" || items[0]["rating"] != "8.5" || items[0]["year"] != "2026" || items[0]["type"] != "电影" || items[0]["region"] != "中国大陆" {
 		t.Errorf("item 0 = %v", items[0])
 	}
-	if items[1]["rating"] != "" || items[1]["year"] != "2025" {
+	if items[1]["rating"] != "" || items[1]["year"] != "2025" || items[1]["region"] != "美国" {
 		t.Errorf("item 1 = %v", items[1])
 	}
 }

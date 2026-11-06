@@ -173,11 +173,18 @@ func fetchDoubanURL(u, doubanType string, timeout time.Duration) ([]map[string]a
 		if m := doubanYearRe.FindStringSubmatch(s.CardSubtitle); m != nil {
 			year = m[1]
 		}
+		// 地区：card_subtitle 形如 "2026 / 中国大陆 / 剧情"，第二段是地区
+		// （第五批：综艺“国内/国外” pill 靠它在前端过滤；没有地区信息的条目 region 为空）
+		region := ""
+		if parts := strings.Split(s.CardSubtitle, "/"); len(parts) >= 2 {
+			region = strings.TrimSpace(parts[1])
+		}
 		items = append(items, map[string]any{
 			"title":  s.Title,
 			"poster": s.Cover,
 			"rating": s.Rate,
 			"year":   year,
+			"region": region,
 			"type":   kind,
 		})
 	}

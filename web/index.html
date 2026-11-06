@@ -26,12 +26,19 @@ section{margin:28px 0} h2{font-size:20px;font-weight:700;margin:14px 0 12px}
 .card img{width:100%;height:270px;object-fit:cover;background:#2a2a35;display:block}
 .cardplay{position:absolute;right:10px;bottom:72px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.45);font-size:16px;cursor:pointer;z-index:2;line-height:1}
 .card div{padding:10px 12px;font-size:14px} .card div div{padding:0} .card small{color:var(--mut)}
-/* v1.3 问候横幅：蓝紫粉渐变，不是以前那个“最新入库”横幅 */
-.greetbanner{display:flex;justify-content:space-between;align-items:center;gap:18px;background:linear-gradient(90deg,#4f46e5,#7c3aed,#db2777);border-radius:20px;padding:28px 32px;color:#fff}
-.greetbanner h2{font-size:24px;margin:0 0 6px}
-.greetbanner p{margin:0;color:rgba(255,255,255,0.85);font-size:14px}
-.greetbanner button{background:rgba(255,255,255,0.16);border-color:rgba(255,255,255,0.35);color:#fff}
-.greeticon{font-size:44px;width:72px;height:72px;min-width:72px;border:1px solid rgba(255,255,255,0.4);border-radius:50%;display:flex;align-items:center;justify-content:center}
+/* 第五批：首页五入口（照搬电视端）+ 分类详情页药丸筛选（借鉴 LunaTV）；问候横幅已取消 */
+.catentries{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+@media (max-width:900px){ .catentries{grid-template-columns:repeat(3,1fr)} }
+.catentry{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 10px;cursor:pointer;font-size:15px;color:var(--txt);transition:transform .2s,border-color .2s}
+.catentry:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.2)}
+.catentry b{font-size:28px;line-height:1}
+.cattitle{font-size:32px;font-weight:800;margin:6px 0 4px}
+.catsub{color:var(--mut);font-size:15px;margin-bottom:8px}
+.catfilter{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:8px 20px;margin:14px 0}
+.catfilter .frow{display:flex;align-items:center;gap:10px;margin:12px 0;flex-wrap:wrap}
+.catfilter .flabel{color:var(--mut);width:64px;flex-shrink:0;font-size:14px}
+.pill{background:#26262f;border:1px solid var(--line);border-radius:999px;padding:8px 18px;font-size:14px;color:var(--txt)}
+.pill.on{background:#52525f;border-color:#52525f;color:#fff}
 .muted{color:var(--mut);font-size:13px} .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#fff;color:#111;padding:10px 18px;border-radius:20px;z-index:50;display:none;max-width:90vw}
 video{width:100%;max-height:62vh;background:#000;border-radius:12px}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0} .tabs button.on{background:var(--acc);border-color:var(--acc)}
@@ -85,11 +92,11 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <button data-view="home" class="on" onclick="showView('home',this)">🏠 首页</button>
 <button data-view="shelf" onclick="goShelfAll()">🌐 货架</button>
 <button data-view="search" onclick="showView('search',this)">🔍 搜索</button>
-<button data-cat="电影" onclick="goNavCat('电影')">🎬 电影</button>
-<button data-cat="剧集" onclick="goNavCat('剧集')">📺 剧集</button>
-<button data-cat="短剧" onclick="goNavCat('短剧')">⏯ 短剧</button>
-<button data-cat="动漫" onclick="goNavCat('动漫')">🐱 动漫</button>
-<button data-cat="综艺" onclick="goNavCat('综艺')">🍀 综艺</button>
+<button data-cat="电影" onclick="openCat('电影')">🎬 电影</button>
+<button data-cat="剧集" onclick="openCat('剧集')">📺 剧集</button>
+<button data-cat="短剧" onclick="openCat('短剧')">⏯ 短剧</button>
+<button data-cat="动漫" onclick="openCat('动漫')">🐱 动漫</button>
+<button data-cat="综艺" onclick="openCat('综艺')">🍀 综艺</button>
 <button data-view="live" onclick="showView('live',this)">📡 直播</button>
 <button data-view="fav" onclick="showView('fav',this)">👤 我的</button>
 <button data-view="settings" onclick="showView('settings',this)">⚙️ 设置</button>
@@ -106,9 +113,16 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <span class="muted">原型默认 admin / admin123。电视端用同样地址 + 账号登录。</span>
 </div>
 
-<!-- 首页：全宽 Netflix 式布局 + 问候横幅（不是以前那个“最新入库”横幅） -->
+<!-- 首页：全宽 Netflix 式布局；问候横幅已取消（2026-11-06 用户定：直接去掉，内容置顶），首页顶部改为五分类入口 -->
 <div id="view-home" class="view on">
-<section class="greetbanner"><div><h2 id="greetTitle">下午好</h2><p>发现更多精彩影视内容</p><div style="margin-top:14px"><button onclick="showView('shelf')">🌐 去货架逛逛</button> <button onclick="showView('fav')" style="margin-left:8px">👤 我的收藏</button> <button onclick="shuffleHome()" style="margin-left:8px">🎲 换一批</button></div></div><div class="greeticon">🎬</div></section>
+<!-- 首页五入口：照搬电视端顺序与图标；“换一批”小入口接替横幅里的按钮（其余两个动作本来就在导航栏：货架/我的） -->
+<section id="catEntriesSec"><div class="catentries">
+<button class="catentry" onclick="openCat('电影')"><b>🎬</b>电影</button>
+<button class="catentry" onclick="openCat('剧集')"><b>📺</b>剧集</button>
+<button class="catentry" onclick="openCat('短剧')"><b>⏯️</b>短剧</button>
+<button class="catentry" onclick="openCat('动漫')"><b>🐱</b>动漫</button>
+<button class="catentry" onclick="openCat('综艺')"><b>🍀</b>综艺</button>
+</div><div style="margin-top:10px"><button onclick="shuffleHome()">🎲 换一批</button> <span class="muted">随机挑 20 部高分或近 3 年的片子</span></div></section>
 <section id="homeContinueSec"><div class="rowhead"><h2>▶ 继续观看</h2><span><button onclick="showView('fav')">查看更多 ▸</button></span></div><div class="rowwrap"><div id="continueGrid" class="row"><span class="muted">登录后显示</span></div><button class="sidearrow left" onclick="scrollRow('continueGrid',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('continueGrid',1)">&gt;</button></div></section>
 <section id="upcomingSec"><div class="rowhead"><h2>📅 即将上映</h2><span><button id="upFAll" class="on" onclick="upcomingFilter('all',this)">全部</button> <button id="upFMovie" onclick="upcomingFilter('电影片',this)">电影</button> <button id="upFTv" onclick="upcomingFilter('连续剧',this)">电视剧</button> <button onclick="refreshUpcoming(true)">刷新 ↻</button> <button onclick="showView('upcoming')">查看全部日程 ▸</button> <button onclick="showView('fav')">我的想看 ▸</button></span></div><div class="rowwrap"><div id="upcomingRow" class="row"><span class="muted">正在拉上映数据…</span></div><button class="sidearrow left" onclick="scrollRow('upcomingRow',-1)">&lt;</button><button class="sidearrow right" onclick="scrollRow('upcomingRow',1)">&gt;</button></div><div id="upcomingMsg" class="muted"></div></section>
 <section><div id="homeRows"></div></section>
@@ -128,6 +142,19 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <span id="syncmsg" class="muted"></span>
 <div id="catalog" class="grid"></div>
 <div style="margin-top:12px"><button id="shelfMore" onclick="shelfShowMore()" style="display:none">加载更多</button> <button onclick="shelfCollapse()" style="display:none" id="shelfLess">收起</button> <span id="shelfCount" class="muted"></span></div></div><div id="doubanDiscover" style="display:none"><div id="doubanChips" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0"></div><div class="muted" id="doubanDiscMsg"></div><div id="doubanDiscGrid" class="grid" style="margin-top:12px"></div></div></section>
+</div>
+
+<!-- 分类详情：电视端五入口 + LunaTV 式分类页（大标题+副标题+药丸筛选）；筛选与搜索在顶部保留 -->
+<div id="view-cat" class="view">
+<section>
+<h1 class="cattitle" id="catTitle">电影</h1>
+<div class="catsub" id="catSub">来自豆瓣的精选内容</div>
+<div class="catfilter" id="catFilters"></div>
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0"><input id="catSearch" placeholder="在本页结果中搜片名…" style="width:260px" onkeydown="if(event.key==='Enter')catDoSearch()"> <button onclick="catDoSearch()">搜索</button> <button onclick="catClearSearch()" id="catClearSearchBtn" style="display:none">清除搜索</button> <button onclick="catGoFullSearch()" id="catFullSearchBtn" style="display:none">全站搜 ▸</button> <button onclick="goShelf(catKind)">去货架精细筛选 ▸</button></div>
+<div class="muted" id="catMsg"></div>
+<div id="catGrid" class="grid" style="margin-top:12px"></div>
+<div style="margin-top:12px"><button id="catMore" onclick="catShowMore()" style="display:none">加载更多</button> <span id="catCount" class="muted"></span></div>
+</section>
 </div>
 
 <!-- 搜索 -->
@@ -254,8 +281,7 @@ function stopPlayback(){ directPlayWaiting=false; dpSeq++; const ov=document.get
 function showView(v, btn){ if(v!=='detail') stopPlayback(); document.querySelectorAll('.view').forEach(e=>e.classList.remove('on')); document.getElementById('view-'+v).classList.add('on'); document.querySelectorAll('header nav button').forEach(b=>b.classList.remove('on')); if(btn) btn.classList.add('on'); else { const nb=document.querySelector(`header nav button[data-view="${v}"]`); if(nb) nb.classList.add('on'); } window.scrollTo(0,0); if(v==='home'){ loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); } if(v==='shelf'){ markShelfTab(); if(!shelfItems.length) loadCatalog(); } if(v==='fav'){ loadWants(); loadFav(); loadContinueInto('favContinue'); } if(v==='upcoming'){ loadUpcomingPage(); } if(v==='live'){ loadLive(); } if(v==='settings'){ loadSettings(); loadUsers(); loadUserSettings(); loadSyncConfig(); loadUpcomingConfig(); loadImageProxies(); loadDoubanProxy(); } }
 function posterUrl(p){ if(!p) return ''; return p.startsWith('http') ? '/api/image-proxy?url='+encodeURIComponent(p) : p; }
 function card(item, onclick, extra){ const d=document.createElement('div'); d.className='card'; const rating=(item.rating&&item.rating!=='0'&&item.rating!=='0.0')?`<span class="rating">★ ${item.rating}</span>`:''; const epbadge=item.epBadge?`<span class="epbadge">${item.epBadge}</span>`:''; const chip=item.sourceChip?`<div><span class="sourcechip">${item.sourceChip}</span></div>`:''; const prog=(item.progress!==undefined&&item.progress!==null)?`<div class="progressbar"><i style="width:${Math.round(Math.min(1,Math.max(0,item.progress))*100)}%"></i></div>`:''; const dpBtn=(item.progress===undefined)?`<button class="cardplay" onclick="event.stopPropagation();directPlay('${(item.title||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">▶</button>`:''; d.innerHTML=`${rating}${epbadge}${dpBtn}<img loading="lazy" src="${posterUrl(item.poster||item.cover||'')}" onerror="this.style.display='none'"><div>${item.title}<br><small>${item.year||''} ${item.type||item.type_name||''} ${item.source_name||''} ${item.nsrc?('· '+item.nsrc+'个源'):''}</small>${chip}${prog}${extra||''}</div>`; d.onclick=onclick; return d; }
-function updateGreeting(){ const who=document.getElementById('who').textContent.replace('已登录：','').trim(); const h=new Date().getHours(); const g=h<6?'夜深了':h<12?'上午好':h<14?'中午好':h<18?'下午好':'晚上好'; const el=document.getElementById('greetTitle'); if(el) el.textContent=`${g}，${who||'你'} 👋`; }
-async function doLogin(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; toast('登录成功'); updateGreeting(); loadUserSpeed(); homeLoaded=false; loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); }catch(e){ toast('登录失败：'+e.message); } }
+async function doLogin(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; toast('登录成功'); loadUserSpeed(); homeLoaded=false; loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); }catch(e){ toast('登录失败：'+e.message); } }
 async function doLogout(){ try{ await api('/api/logout',{method:'POST'}); }catch(e){} location.reload(); }
 async function doRegister(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; toast('注册并登录成功'); }catch(e){ toast('注册失败：'+e.message); } }
 let shelfItems=[], shelfShown=0;
@@ -276,9 +302,56 @@ let shelfMode='shelf';
 const doubanDiscoverChips=[{label:'🎬 热门电影',type:'movie',tag:'热门',sort:'recommend'},{label:'⭐ 高分电影',type:'movie',tag:'热门',sort:'rank'},{label:'🎞️ 经典港片',type:'movie',tag:'港片',sort:'rank'},{label:'😂 高分喜剧',type:'movie',tag:'喜剧',sort:'rank'},{label:'📺 热门剧集',type:'tv',tag:'热门',sort:'recommend'},{label:'🎭 华语口碑剧',type:'tv',tag:'国产剧',sort:'rank'},{label:'🌍 热门美剧',type:'tv',tag:'美剧',sort:'recommend'},{label:'🎤 热门综艺',type:'tv',tag:'综艺',sort:'recommend'},{label:'🌿 高分纪录片',type:'tv',tag:'纪录片',sort:'rank'}];
 function setShelfMode(m){ shelfMode=m; document.getElementById('shelfModeBtnShelf').className=m==='shelf'?'primary':''; document.getElementById('shelfModeBtnDouban').className=m==='douban'?'primary':''; document.getElementById('shelfBrowse').style.display=m==='shelf'?'':'none'; document.getElementById('doubanDiscover').style.display=m==='douban'?'':'none'; if(m==='douban'&&!document.getElementById('doubanChips').children.length){ const el=document.getElementById('doubanChips'); doubanDiscoverChips.forEach((c,i)=>{ const b=document.createElement('button'); b.textContent=c.label; b.onclick=()=>loadDoubanDiscover(i); el.appendChild(b); }); loadDoubanDiscover(0); } }
 async function loadDoubanDiscover(i){ document.querySelectorAll('#doubanChips button').forEach((b,j)=>b.className=j===i?'primary':''); const c=doubanDiscoverChips[i]; const grid=document.getElementById('doubanDiscGrid'); const msg=document.getElementById('doubanDiscMsg'); grid.innerHTML=''; msg.textContent='正在拉豆瓣榜单…'; try{ const d=await api(`/api/douban?type=${c.type}&tag=${encodeURIComponent(c.tag)}&sort=${c.sort}&limit=30`); if(!d.items||!d.items.length) throw new Error('empty'); msg.textContent=''; d.items.forEach(it=>grid.appendChild(card(it, ()=>openTitle(it.title)))); }catch(e){ msg.textContent='豆瓣拉取失败，换个标签试试。'; } }
-function goNavCat(t){ showView('shelf'); selectShelfTab(t); }
 function goShelfAll(){ showView('shelf'); selectShelfTab(''); }
 function goShelf(t){ showView('shelf'); selectShelfTab(t); }
+
+function goShelf(t){ showView('shelf'); selectShelfTab(t); }
+
+// ---- 分类详情页（第五批）：电视端五入口 + LunaTV 式展示 ----
+// 数据来源：电影/电视剧/综艺走豆瓣榜单（tag+sort 组合，沿用第二批约定）；
+// 短剧走目录库（genre 题材 + q 搜名称）；动漫每日放送走 Bangumi 日历，番剧/剧场版走目录库。
+// 短剧“反转爽剧”库里没有对应题材，取最接近的“爽文短”；“ai短剧”库里暂无，点开会提示空。
+const catConfig={
+ '电影':{title:'电影',sub:'来自豆瓣的精选内容',src:'douban',dbtype:'movie',
+  rows:[{label:'分类',key:'cat',opts:[{label:'全部',tag:'热门',sort:'recommend'},{label:'热门电影',tag:'热门',sort:'recommend'},{label:'最新电影',tag:'热门',sort:'time'},{label:'豆瓣高分',tag:'热门',sort:'rank'},{label:'冷门佳片',tag:'冷门佳片',sort:'rank'}]},
+        {label:'地区',key:'region',opts:[{label:'全部',tag:''},{label:'华语',tag:'华语'},{label:'欧美',tag:'欧美'},{label:'韩国',tag:'韩国'},{label:'日本',tag:'日本'}]}]},
+ '剧集':{title:'电视剧',sub:'来自豆瓣的精选内容',src:'douban',dbtype:'tv',
+  rows:[{label:'分类',key:'cat',opts:[{label:'全部',tag:'热门',sort:'recommend'},{label:'最近热门',tag:'热门',sort:'time'}]},
+        {label:'类型',key:'type',opts:[{label:'全部',tag:''},{label:'国产',tag:'国产剧'},{label:'欧美',tag:'美剧'},{label:'日本',tag:'日剧'},{label:'韩国',tag:'韩剧'},{label:'动漫',tag:'动漫'},{label:'纪录片',tag:'纪录片'}]}]},
+ '短剧':{title:'短剧频道',sub:'精彩短剧，一刷到底',src:'catalog',
+  rows:[{label:'分类筛选',key:'genre',opts:[{label:'短剧',genre:''},{label:'女频恋爱',genre:'女频恋爱'},{label:'反转爽剧',genre:'爽文短'},{label:'古装仙侠',genre:'古装仙侠'},{label:'年代穿越',genre:'年代穿越'},{label:'脑洞悬疑',genre:'脑洞悬疑'},{label:'现代都市',genre:'现代都市'},{label:'ai短剧',genre:'ai短剧'}]}]},
+ '动漫':{title:'动漫',sub:'来自 Bangumi 番组计划的精选内容',src:'anime',
+  rows:[{label:'分类',key:'mode',opts:[{label:'每日放送',mode:'daily'},{label:'番剧',mode:'series'},{label:'剧场版',mode:'movie'}]},
+        {label:'星期',key:'weekday',opts:[{label:'周一',wd:1},{label:'周二',wd:2},{label:'周三',wd:3},{label:'周四',wd:4},{label:'周五',wd:5},{label:'周六',wd:6},{label:'周日',wd:7}]}]},
+ '综艺':{title:'综艺',sub:'来自豆瓣的精选内容',src:'douban',dbtype:'tv',
+  rows:[{label:'分类',key:'cat',opts:[{label:'全部',tag:'综艺',sort:'recommend'},{label:'最近热门',tag:'综艺',sort:'time'}]},
+        {label:'类型',key:'region',opts:[{label:'全部',reg:''},{label:'国内',reg:'domestic'},{label:'国外',reg:'foreign'}]}]},
+};
+let catKind='', catSel={}, catItems=[], catShown=30, catBgm=null;
+function catState(k){ if(!catSel[k]){ const c=catConfig[k]; const s={}; c.rows.forEach(r=>{ s[r.key]=0; }); if(k==='动漫'){ s.weekday=(new Date().getDay()+6)%7; } catSel[k]=s; } return catSel[k]; }
+function openCat(k){ catKind=k; showView('cat'); document.querySelectorAll('header nav button').forEach(b=>b.classList.remove('on')); const nb=document.querySelector(`header nav button[data-cat="${k}"]`); if(nb) nb.classList.add('on'); renderCatFilters(); loadCat(); }
+function renderCatFilters(){ const c=catConfig[catKind]; document.getElementById('catTitle').textContent=c.title; document.getElementById('catSub').textContent=c.sub; document.getElementById('catSearch').placeholder=catKind==='短剧'?'搜短剧名称…':'在本页结果中搜片名…'; const st=catState(catKind); const box=document.getElementById('catFilters'); box.innerHTML=''; c.rows.forEach(r=>{ if(r.key==='weekday'&&c.rows[0].opts[st.mode].mode!=='daily') return; const row=document.createElement('div'); row.className='frow'; const lab=document.createElement('span'); lab.className='flabel'; lab.textContent=r.label; row.appendChild(lab); r.opts.forEach((o,i)=>{ const b=document.createElement('button'); b.className='pill'+(st[r.key]===i?' on':''); b.textContent=o.label; b.onclick=()=>{ st[r.key]=i; renderCatFilters(); loadCat(); }; row.appendChild(b); }); box.appendChild(row); }); }
+async function loadCat(){ const c=catConfig[catKind]; const st=catState(catKind); const grid=document.getElementById('catGrid'); const msg=document.getElementById('catMsg'); grid.innerHTML=''; msg.textContent='正在加载…'; document.getElementById('catMore').style.display='none'; document.getElementById('catFullSearchBtn').style.display='none'; catItems=[]; catShown=30; const q=document.getElementById('catSearch').value.trim(); try{
+ if(c.src==='douban'){ const catRow=c.rows[0].opts[st.cat]; const row2=c.rows[1].opts[st[c.rows[1].key]]; let tag=catRow.tag, sort=catRow.sort, regionFilter='';
+  if(catKind==='综艺'){ regionFilter=row2.reg||''; } else if(row2.tag){ tag=row2.tag; }
+  let d; try{ d=await api(`/api/douban?type=${c.dbtype}&tag=${encodeURIComponent(tag)}&sort=${sort}&limit=30`); if(!d.items||!d.items.length) throw new Error('empty'); }catch(e){ msg.textContent='豆瓣拉取失败，改走目录库。'; d=await api(`/api/catalog?type=${encodeURIComponent(catKind)}&limit=30`); }
+  let items=d.items||[];
+  if(regionFilter){ const dom=r=>/中国|大陆|香港|台湾/.test(r||''); const f=items.filter(it=>regionFilter==='domestic'?dom(it.region):(it.region&&!dom(it.region))); if(f.length) items=f; else msg.textContent='这批条目没带地区信息，已显示全部。'; }
+  catItems=items;
+ } else if(c.src==='catalog'){ const g=c.rows[0].opts[st.genre]; const d=await api(`/api/catalog?type=${encodeURIComponent('短剧')}&genre=${encodeURIComponent(g.genre||'')}&q=${encodeURIComponent(q)}&limit=200`); catItems=d.items||[]; if(catKind==='短剧'&&g.genre==='ai短剧'&&!catItems.length) msg.textContent='库里暂无 AI 短剧，等同步进了新源再来看看。'; }
+ else if(c.src==='anime'){ const mode=c.rows[0].opts[st.mode].mode;
+  if(mode==='daily'){ try{ if(!catBgm) catBgm=await api('/api/bangumi/calendar'); const wd=c.rows[1].opts[st.weekday].wd; const day=(catBgm.weekdays||[]).find(w=>w.id===wd); catItems=(day&&day.items)||[]; if(!catItems.length) msg.textContent='Bangumi 这天没有放送，换个星期看看。'; }catch(e){ msg.textContent='Bangumi 日历拉取失败，改走目录库动漫。'; const d=await api('/api/catalog?type='+encodeURIComponent('动漫')+'&limit=30'); catItems=d.items||[]; } }
+  else { const d=await api('/api/catalog?type='+encodeURIComponent('动漫')+'&limit=200'); const all=d.items||[]; catItems=mode==='movie'?all.filter(it=>it.type==='动漫电影'):all.filter(it=>it.type!=='动漫电影'); }
+ }
+ if(q&&c.src!=='catalog'){ const ql=q.toLowerCase(); catItems=catItems.filter(it=>(it.title||'').toLowerCase().includes(ql)); }
+ if(q&&!catItems.length) document.getElementById('catFullSearchBtn').style.display='';
+ renderCat();
+}catch(e){ msg.textContent='加载失败：'+e.message; } }
+function renderCat(){ const grid=document.getElementById('catGrid'); grid.innerHTML=''; if(!catItems.length){ grid.innerHTML='<div class="muted">没有找到，换个筛选或搜搜看。</div>'; document.getElementById('catCount').textContent=''; document.getElementById('catMore').style.display='none'; return; } catItems.slice(0,catShown).forEach(it=>grid.appendChild(card(it, ()=>openTitle(it.title)))); document.getElementById('catCount').textContent=`已显示 ${Math.min(catShown,catItems.length)} / ${catItems.length} 部`; document.getElementById('catMore').style.display=catItems.length>catShown?'':'none'; }
+function catShowMore(){ catShown+=30; renderCat(); }
+function catDoSearch(){ document.getElementById('catClearSearchBtn').style.display=document.getElementById('catSearch').value.trim()?'':'none'; loadCat(); }
+function catClearSearch(){ document.getElementById('catSearch').value=''; document.getElementById('catClearSearchBtn').style.display='none'; loadCat(); }
+function catGoFullSearch(){ const q=document.getElementById('catSearch').value.trim(); if(!q) return; document.getElementById('q').value=q; showView('search'); doSearch(); }
 async function clearShelfFilters(){ const s=tabFilterState(shelfType); s.year=''; s.genre=''; s.region=''; loadShelfInputs(); await loadShelfMeta(shelfType); loadCatalog(); }
 async function loadCatalog(){ try{ const t=shelfType, y=document.getElementById('fyear').value, g=document.getElementById('fgenre').value, rg=document.getElementById('fregion').value; const d=await api(`/api/catalog?type=${encodeURIComponent(t)}&year=${y}&genre=${encodeURIComponent(g)}&region=${encodeURIComponent(rg)}&limit=200`); shelfItems=d.items||[]; shelfShown=30; const el=document.getElementById('catalog'); if(!shelfItems.length) el.innerHTML='<div class="muted">目录还是空的，先点“同步目录”，或去搜索。</div>'; else renderShelf(); }catch(e){ toast(e.message); } }
 let homeLoaded=false;
@@ -519,7 +592,7 @@ async function loadShelfMeta(type){
     (d.regions||[]).forEach(v=>{ const o=document.createElement('option'); o.value=v; rg.appendChild(o); });
   }catch(e){}
 }
-updateGreeting(); ['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{});
+['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{});
 // 开机先认已有的登录 Cookie：有效就直接进首页，不用每次刷新都重新登录；
 // 失效（401）才留着登录框等用户登录。
 (async()=>{ try{ const me=await api('/api/me'); document.getElementById('who').textContent='已登录：'+me.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; loadUserSpeed(); loadHome().catch(()=>{}); loadContinueInto('continueGrid').catch(()=>{}); loadUpcoming().catch(()=>{}); loadWantBadge().catch(()=>{}); }catch(e){} })();
