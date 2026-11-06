@@ -164,7 +164,7 @@ func TestDoubanTagPassthrough(t *testing.T) {
 	t.Setenv("HOME_MEDIA_DOUBAN_PROXY_TYPE", "custom")
 	t.Setenv("HOME_MEDIA_DOUBAN_PROXY_URL", srv.URL)
 
-	items, err := fetchDoubanList("movie", "港片", "rank", 12)
+	items, err := fetchDoubanList("movie", "港片", "rank", 12, 0)
 	if err != nil {
 		t.Fatalf("fetchDoubanList: %v", err)
 	}

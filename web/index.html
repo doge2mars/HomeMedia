@@ -27,11 +27,10 @@ section{margin:28px 0} h2{font-size:20px;font-weight:700;margin:14px 0 12px}
 .cardplay{position:absolute;right:10px;bottom:72px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.45);font-size:16px;cursor:pointer;z-index:2;line-height:1}
 .card div{padding:10px 12px;font-size:14px} .card div div{padding:0} .card small{color:var(--mut)}
 /* 第五批：首页五入口（照搬电视端）+ 分类详情页药丸筛选（借鉴 LunaTV）；问候横幅已取消 */
-.catentries{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
-@media (max-width:900px){ .catentries{grid-template-columns:repeat(3,1fr)} }
-.catentry{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 10px;cursor:pointer;font-size:15px;color:var(--txt);transition:transform .2s,border-color .2s}
-.catentry:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.2)}
-.catentry b{font-size:28px;line-height:1}
+.catentries{display:flex;gap:10px;flex-wrap:wrap}
+.catentry{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 18px;height:56px;cursor:pointer;font-size:15px;color:var(--txt);transition:border-color .2s,background .2s}
+.catentry:hover{border-color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.04)}
+.catentry b{font-size:20px;line-height:1}
 .cattitle{font-size:32px;font-weight:800;margin:6px 0 4px}
 .catsub{color:var(--mut);font-size:15px;margin-bottom:8px}
 .catfilter{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:8px 20px;margin:14px 0}
@@ -138,6 +137,7 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <input id="fyear" list="yearList" placeholder="年份，如 2024" style="width:110px"><datalist id="yearList"></datalist>
 <input id="fgenre" list="genreList" placeholder="类型，如 古装/喜剧" style="width:150px"><datalist id="genreList"></datalist>
 <input id="fregion" list="regionList" placeholder="地区，如 大陆" style="width:110px"><datalist id="regionList"></datalist>
+<select id="fsort" style="width:130px"><option value="">排序：热度</option><option value="latest">排序：最新入库</option><option value="rating">排序：高分</option></select>
 <button onclick="loadCatalog()">筛选</button> <button onclick="clearShelfFilters()">清除筛选</button> <button onclick="syncCatalog()">同步目录（后台）</button>
 <span id="syncmsg" class="muted"></span>
 <div id="catalog" class="grid"></div>
@@ -292,9 +292,9 @@ function shelfCollapse(){ shelfShown=30; renderShelf(); window.scrollTo(0,0); }
 // 不再共用一根筛选栏——今晚那三连 bug（全局下拉、条件串位、旧选项残留）全是共用结构闹的。
 let shelfType='';
 const shelfTabFilters={};
-function tabFilterState(t){ if(!shelfTabFilters[t]) shelfTabFilters[t]={year:'',genre:'',region:''}; return shelfTabFilters[t]; }
-function saveShelfInputs(){ const s=tabFilterState(shelfType); s.year=document.getElementById('fyear').value; s.genre=document.getElementById('fgenre').value; s.region=document.getElementById('fregion').value; }
-function loadShelfInputs(){ const s=tabFilterState(shelfType); document.getElementById('fyear').value=s.year; document.getElementById('fgenre').value=s.genre; document.getElementById('fregion').value=s.region; }
+function tabFilterState(t){ if(!shelfTabFilters[t]) shelfTabFilters[t]={year:'',genre:'',region:'',sort:''}; return shelfTabFilters[t]; }
+function saveShelfInputs(){ const s=tabFilterState(shelfType); s.year=document.getElementById('fyear').value; s.genre=document.getElementById('fgenre').value; s.region=document.getElementById('fregion').value; s.sort=document.getElementById('fsort').value; }
+function loadShelfInputs(){ const s=tabFilterState(shelfType); document.getElementById('fyear').value=s.year; document.getElementById('fgenre').value=s.genre; document.getElementById('fregion').value=s.region; document.getElementById('fsort').value=s.sort; }
 function markShelfTab(){ document.querySelectorAll('header nav button[data-cat]').forEach(b=>b.classList.toggle('on', b.dataset.cat===shelfType)); const sb=document.querySelector('header nav button[data-view="shelf"]'); if(sb) sb.classList.toggle('on', shelfType===''); const st=document.getElementById('shelfTitle'); if(st) st.textContent=shelfType?`${shelfType} · 按条件筛选`:'货架 · 按条件筛选'; }
 async function selectShelfTab(t){ if(shelfMode!=='shelf') setShelfMode('shelf'); saveShelfInputs(); shelfType=t; markShelfTab(); loadShelfInputs(); document.getElementById('catalog').innerHTML='<div class="muted">正在加载…</div>'; await loadShelfMeta(t); loadCatalog(); }
 
@@ -327,11 +327,26 @@ const catConfig={
   rows:[{label:'分类',key:'cat',opts:[{label:'全部',tag:'综艺',sort:'recommend'},{label:'最近热门',tag:'综艺',sort:'time'}]},
         {label:'类型',key:'region',opts:[{label:'全部',reg:''},{label:'国内',reg:'domestic'},{label:'国外',reg:'foreign'}]}]},
 };
-let catKind='', catSel={}, catItems=[], catShown=30, catBgm=null;
+let catKind='', catSel={}, catItems=[], catShown=30, catBgm=null, catStart=0, catHasMore=false;
 function catState(k){ if(!catSel[k]){ const c=catConfig[k]; const s={}; c.rows.forEach(r=>{ s[r.key]=0; }); if(k==='动漫'){ s.weekday=(new Date().getDay()+6)%7; } catSel[k]=s; } return catSel[k]; }
 function openCat(k){ catKind=k; showView('cat'); document.querySelectorAll('header nav button').forEach(b=>b.classList.remove('on')); const nb=document.querySelector(`header nav button[data-cat="${k}"]`); if(nb) nb.classList.add('on'); renderCatFilters(); loadCat(); }
 function renderCatFilters(){ const c=catConfig[catKind]; document.getElementById('catTitle').textContent=c.title; document.getElementById('catSub').textContent=c.sub; document.getElementById('catSearch').placeholder=catKind==='短剧'?'搜短剧名称…':'在本页结果中搜片名…'; const st=catState(catKind); const box=document.getElementById('catFilters'); box.innerHTML=''; c.rows.forEach(r=>{ if(r.key==='weekday'&&c.rows[0].opts[st.mode].mode!=='daily') return; const row=document.createElement('div'); row.className='frow'; const lab=document.createElement('span'); lab.className='flabel'; lab.textContent=r.label; row.appendChild(lab); r.opts.forEach((o,i)=>{ const b=document.createElement('button'); b.className='pill'+(st[r.key]===i?' on':''); b.textContent=o.label; b.onclick=()=>{ st[r.key]=i; renderCatFilters(); loadCat(); }; row.appendChild(b); }); box.appendChild(row); }); }
-async function loadCat(){ const c=catConfig[catKind]; const st=catState(catKind); const grid=document.getElementById('catGrid'); const msg=document.getElementById('catMsg'); grid.innerHTML=''; msg.textContent='正在加载…'; document.getElementById('catMore').style.display='none'; document.getElementById('catFullSearchBtn').style.display='none'; catItems=[]; catShown=30; const q=document.getElementById('catSearch').value.trim(); try{
+// fetchDoubanCatPage：分类页拉一页豆瓣榜单（start 为翻页偏移）；首拉失败回退目录库（limit=200），
+// 后续页失败直接抛（回退会重复）。返回 {items, hasMore}：上游满 30 条才认为还有下一页。
+async function fetchDoubanCatPage(tag, sort, start){
+  const c=catConfig[catKind];
+  try{
+    const d=await api(`/api/douban?type=${c.dbtype}&tag=${encodeURIComponent(tag)}&sort=${sort}&limit=30&start=${start}`);
+    if(!d.items||!d.items.length) throw new Error('empty');
+    return {items:d.items, hasMore:d.items.length>=30};
+  }catch(e){
+    if(start>0) throw e;
+    document.getElementById('catMsg').textContent='豆瓣拉取失败，改走目录库。';
+    const d=await api(`/api/catalog?type=${encodeURIComponent(catKind)}&limit=200`);
+    return {items:d.items||[], hasMore:false};
+  }
+}
+async function loadCat(){ const c=catConfig[catKind]; const st=catState(catKind); const grid=document.getElementById('catGrid'); const msg=document.getElementById('catMsg'); grid.innerHTML=''; msg.textContent='正在加载…'; document.getElementById('catMore').style.display='none'; document.getElementById('catFullSearchBtn').style.display='none'; catItems=[]; catShown=30; catStart=0; catHasMore=false; const q=document.getElementById('catSearch').value.trim(); try{
  if(c.src==='douban'){ const catRow=c.rows[0].opts[st.cat]; const row2=c.rows[1].opts[st[c.rows[1].key]]; let tag=catRow.tag, sort=catRow.sort, regionFilter='';
   if(catKind==='综艺'){ regionFilter=row2.reg||''; } else if(row2.tag){ tag=row2.tag; }
   let d, items;
@@ -341,8 +356,8 @@ async function loadCat(){ const c=catConfig[catKind]; const st=catState(catKind)
    const all=d.items||[]; const dom=r=>/中国|大陆|香港|台湾|港台/.test(r||'');
    items=all.filter(it=>regionFilter==='domestic'?dom(it.region):(it.region&&!dom(it.region)));
   } else {
-   try{ d=await api(`/api/douban?type=${c.dbtype}&tag=${encodeURIComponent(tag)}&sort=${sort}&limit=30`); if(!d.items||!d.items.length) throw new Error('empty'); }catch(e){ msg.textContent='豆瓣拉取失败，改走目录库。'; d=await api(`/api/catalog?type=${encodeURIComponent(catKind)}&limit=30`); }
-   items=d.items||[];
+   const pg=await fetchDoubanCatPage(tag, sort, 0);
+   items=pg.items; catHasMore=pg.hasMore;
   }
   catItems=items;
  } else if(c.src==='catalog'){ const g=c.rows[0].opts[st.genre]; const d=await api(`/api/catalog?type=${encodeURIComponent('短剧')}&genre=${encodeURIComponent(g.genre||'')}&q=${encodeURIComponent(q)}&limit=200`); catItems=d.items||[]; if(catKind==='短剧'&&g.genre==='ai短剧'&&!catItems.length) msg.textContent='库里暂无 AI 短剧，等同步进了新源再来看看。'; }
@@ -354,13 +369,31 @@ async function loadCat(){ const c=catConfig[catKind]; const st=catState(catKind)
  if(q&&!catItems.length) document.getElementById('catFullSearchBtn').style.display='';
  renderCat();
 }catch(e){ msg.textContent='加载失败：'+e.message; } }
-function renderCat(){ const grid=document.getElementById('catGrid'); grid.innerHTML=''; if(!catItems.length){ grid.innerHTML='<div class="muted">没有找到，换个筛选或搜搜看。</div>'; document.getElementById('catCount').textContent=''; document.getElementById('catMore').style.display='none'; return; } catItems.slice(0,catShown).forEach(it=>grid.appendChild(card(it, ()=>openTitle(it.title)))); document.getElementById('catCount').textContent=`已显示 ${Math.min(catShown,catItems.length)} / ${catItems.length} 部`; document.getElementById('catMore').style.display=catItems.length>catShown?'':'none'; }
-function catShowMore(){ catShown+=30; renderCat(); }
+function renderCat(){ const grid=document.getElementById('catGrid'); grid.innerHTML=''; if(!catItems.length){ grid.innerHTML='<div class="muted">没有找到，换个筛选或搜搜看。</div>'; document.getElementById('catCount').textContent=''; document.getElementById('catMore').style.display='none'; return; } catItems.slice(0,catShown).forEach(it=>grid.appendChild(card(it, ()=>openTitle(it.title)))); const shown=Math.min(catShown,catItems.length); const c=catConfig[catKind]; document.getElementById('catCount').textContent=(c.src==='douban'&&catHasMore)?`已显示 ${shown} 部`:`已显示 ${shown} / ${catItems.length} 部`; document.getElementById('catMore').style.display=(catItems.length>catShown||(c.src==='douban'&&catHasMore))?'':'none'; }
+async function catShowMore(){
+  const c=catConfig[catKind];
+  if(c.src==='douban'&&catHasMore){
+    const btn=document.getElementById('catMore'); btn.disabled=true; btn.textContent='正在加载…';
+    try{
+      const st=catState(catKind); const catRow=c.rows[0].opts[st.cat]; const row2=c.rows[1].opts[st[c.rows[1].key]];
+      let tag=catRow.tag, sort=catRow.sort; if(catKind!=='综艺'&&row2.tag) tag=row2.tag;
+      const pg=await fetchDoubanCatPage(tag, sort, catStart+30);
+      let items=pg.items;
+      const q=document.getElementById('catSearch').value.trim();
+      if(q){ const ql=q.toLowerCase(); items=items.filter(it=>(it.title||'').toLowerCase().includes(ql)); }
+      catItems=catItems.concat(items); catStart+=30; catShown+=30; catHasMore=pg.hasMore;
+      renderCat();
+    }catch(e){ catHasMore=false; renderCat(); toast('加载更多失败：'+e.message); }
+    btn.disabled=false; btn.textContent='加载更多';
+    return;
+  }
+  catShown+=30; renderCat();
+}
 function catDoSearch(){ document.getElementById('catClearSearchBtn').style.display=document.getElementById('catSearch').value.trim()?'':'none'; loadCat(); }
 function catClearSearch(){ document.getElementById('catSearch').value=''; document.getElementById('catClearSearchBtn').style.display='none'; loadCat(); }
 function catGoFullSearch(){ const q=document.getElementById('catSearch').value.trim(); if(!q) return; document.getElementById('q').value=q; showView('search'); doSearch(); }
-async function clearShelfFilters(){ const s=tabFilterState(shelfType); s.year=''; s.genre=''; s.region=''; loadShelfInputs(); await loadShelfMeta(shelfType); loadCatalog(); }
-async function loadCatalog(){ try{ const t=shelfType, y=document.getElementById('fyear').value, g=document.getElementById('fgenre').value, rg=document.getElementById('fregion').value; const d=await api(`/api/catalog?type=${encodeURIComponent(t)}&year=${y}&genre=${encodeURIComponent(g)}&region=${encodeURIComponent(rg)}&limit=200`); shelfItems=d.items||[]; shelfShown=30; const el=document.getElementById('catalog'); if(!shelfItems.length) el.innerHTML='<div class="muted">目录还是空的，先点“同步目录”，或去搜索。</div>'; else renderShelf(); }catch(e){ toast(e.message); } }
+async function clearShelfFilters(){ const s=tabFilterState(shelfType); s.year=''; s.genre=''; s.region=''; s.sort=''; loadShelfInputs(); await loadShelfMeta(shelfType); loadCatalog(); }
+async function loadCatalog(){ try{ const t=shelfType, y=document.getElementById('fyear').value, g=document.getElementById('fgenre').value, rg=document.getElementById('fregion').value, sort=document.getElementById('fsort').value; const d=await api(`/api/catalog?type=${encodeURIComponent(t)}&year=${y}&genre=${encodeURIComponent(g)}&region=${encodeURIComponent(rg)}&sort=${sort}&limit=200`); shelfItems=d.items||[]; shelfShown=30; const el=document.getElementById('catalog'); if(!shelfItems.length) el.innerHTML='<div class="muted">目录还是空的，先点“同步目录”，或去搜索。</div>'; else renderShelf(); }catch(e){ toast(e.message); } }
 let homeLoaded=false;
 function scrollRow(id, dir){ const el=document.getElementById(id); if(el) el.scrollBy({left: dir*el.clientWidth*0.8, behavior:'smooth'}); }
 function toggleRowExpand(id, btn){ const el=document.getElementById(id); const ex=el.classList.toggle('grid'); el.classList.toggle('row', !ex); btn.textContent=ex?'收起 ▴':'展开全部 ▾'; }

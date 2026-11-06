@@ -223,7 +223,7 @@ const imageProbeFallbackURL = "https://img9.doubanio.com/view/photo/s_ratio_post
 // probeImageURL：测试用的海报地址——先用当前豆瓣代理拉热门榜单取第一张封面，
 // 拿不到就用兜底图。
 func probeImageURL() string {
-	if items, err := fetchDoubanListTimeout("movie", "热门", "recommend", 3, 5*time.Second); err == nil {
+	if items, err := fetchDoubanListTimeout("movie", "热门", "recommend", 3, 0, 5*time.Second); err == nil {
 		for _, it := range items {
 			if p, _ := it["poster"].(string); p != "" {
 				return p

@@ -28,7 +28,7 @@ func TestDoubanListURL(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("HOME_MEDIA_DOUBAN_PROXY_TYPE", c.proxyType)
 			t.Setenv("HOME_MEDIA_DOUBAN_PROXY_URL", c.proxyURL)
-			got := doubanListURL("movie", "热门", "recommend", 12)
+			got := doubanListURL("movie", "热门", "recommend", 12, 0)
 			if !strings.HasPrefix(got, c.wantPrefix) {
 				t.Errorf("doubanListURL = %q, want prefix %q", got, c.wantPrefix)
 			}
@@ -59,7 +59,7 @@ func TestFetchDoubanList(t *testing.T) {
 	t.Setenv("HOME_MEDIA_DOUBAN_PROXY_TYPE", "custom")
 	t.Setenv("HOME_MEDIA_DOUBAN_PROXY_URL", srv.URL)
 
-	items, err := fetchDoubanList("movie", "热门", "recommend", 12)
+	items, err := fetchDoubanList("movie", "热门", "recommend", 12, 0)
 	if err != nil {
 		t.Fatalf("fetchDoubanList: %v", err)
 	}

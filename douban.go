@@ -72,16 +72,16 @@ func getDoubanProxy() (string, string) {
 	return t, strings.TrimSpace(getenv("HOME_MEDIA_DOUBAN_PROXY_URL", ""))
 }
 
-// doubanListURL：按当前代理拼榜单地址。
-func doubanListURL(doubanType, tag, sort string, limit int) string {
+// doubanListURL：按当前代理拼榜单地址。start 为翻页偏移（透传上游 page_start）。
+func doubanListURL(doubanType, tag, sort string, limit, start int) string {
 	typ, custom := getDoubanProxy()
-	return doubanListURLWith(typ, custom, doubanType, tag, sort, limit)
+	return doubanListURLWith(typ, custom, doubanType, tag, sort, limit, start)
 }
 
 // doubanListURLWith：按指定档位拼榜单地址（代理测试用：未保存的档位也能测）。
 // zwei 是前缀式代理（目标地址整体 URL 编码后接在后面，
 // 与 LunaTV fetchWithTimeout 同款）；其余是换 base 域名。
-func doubanListURLWith(typ, custom, doubanType, tag, sort string, limit int) string {
+func doubanListURLWith(typ, custom, doubanType, tag, sort string, limit, start int) string {
 	base, ok := doubanProxyTypes[typ]
 	if !ok {
 		if typ == "custom" && custom != "" {
@@ -90,8 +90,8 @@ func doubanListURLWith(typ, custom, doubanType, tag, sort string, limit int) str
 			base = doubanProxyTypes["direct"]
 		}
 	}
-	direct := fmt.Sprintf("%s/j/search_subjects?type=%s&tag=%s&sort=%s&page_limit=%d&page_start=0",
-		base, url.QueryEscape(doubanType), url.QueryEscape(tag), url.QueryEscape(sort), limit)
+	direct := fmt.Sprintf("%s/j/search_subjects?type=%s&tag=%s&sort=%s&page_limit=%d&page_start=%d",
+		base, url.QueryEscape(doubanType), url.QueryEscape(tag), url.QueryEscape(sort), limit, start)
 	if typ == "zwei" {
 		return "https://ciao-cors.is-an.org/" + url.QueryEscape(direct)
 	}
@@ -122,18 +122,18 @@ var (
 
 // fetchDoubanList：调豆瓣榜单接口，返回首页卡片直接能用的条目
 // （title/poster/rating/year/type，与 /api/catalog 的条目字段对齐）。
-func fetchDoubanList(doubanType, tag, sort string, limit int) ([]map[string]any, error) {
-	return fetchDoubanListTimeout(doubanType, tag, sort, limit, 10*time.Second)
+func fetchDoubanList(doubanType, tag, sort string, limit, start int) ([]map[string]any, error) {
+	return fetchDoubanListTimeout(doubanType, tag, sort, limit, start, 10*time.Second)
 }
 
 // fetchDoubanListTimeout：同上，可指定超时（代理测试用 5 秒）。
-func fetchDoubanListTimeout(doubanType, tag, sort string, limit int, timeout time.Duration) ([]map[string]any, error) {
-	return fetchDoubanURL(doubanListURL(doubanType, tag, sort, limit), doubanType, timeout)
+func fetchDoubanListTimeout(doubanType, tag, sort string, limit, start int, timeout time.Duration) ([]map[string]any, error) {
+	return fetchDoubanURL(doubanListURL(doubanType, tag, sort, limit, start), doubanType, timeout)
 }
 
 // fetchDoubanListWithProxy：用指定档位（未保存的也行，供代理测试）拉榜单。
-func fetchDoubanListWithProxy(typ, custom, doubanType, tag, sort string, limit int, timeout time.Duration) ([]map[string]any, error) {
-	return fetchDoubanURL(doubanListURLWith(typ, custom, doubanType, tag, sort, limit), doubanType, timeout)
+func fetchDoubanListWithProxy(typ, custom, doubanType, tag, sort string, limit, start int, timeout time.Duration) ([]map[string]any, error) {
+	return fetchDoubanURL(doubanListURLWith(typ, custom, doubanType, tag, sort, limit, start), doubanType, timeout)
 }
 
 // fetchDoubanURL：按给定地址调榜单接口并解析成首页卡片条目。
@@ -211,8 +211,15 @@ func handleDouban(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	// start：分类页翻页偏移（透传上游 page_start），默认 0；缓存键带 start，分开缓存
+	start := 0
+	if v := r.URL.Query().Get("start"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			start = n
+		}
+	}
 	proxyType, proxyCustom := getDoubanProxy()
-	key := typ + "|" + tag + "|" + sort + "|" + strconv.Itoa(limit) + "|" + proxyType + "|" + proxyCustom
+	key := typ + "|" + tag + "|" + sort + "|" + strconv.Itoa(limit) + "|" + strconv.Itoa(start) + "|" + proxyType + "|" + proxyCustom
 	doubanCacheMu.Lock()
 	if e, ok := doubanCache[key]; ok && time.Since(e.at) < doubanCacheTTL {
 		doubanCacheMu.Unlock()
@@ -220,7 +227,7 @@ func handleDouban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	doubanCacheMu.Unlock()
-	items, err := fetchDoubanList(typ, tag, sort, limit)
+	items, err := fetchDoubanList(typ, tag, sort, limit, start)
 	if err != nil {
 		writeJSON(w, 502, map[string]string{"error": err.Error()})
 		return
@@ -303,7 +310,7 @@ func handleDoubanProxyTest(w http.ResponseWriter, r *http.Request) {
 		body.Custom = strings.TrimSuffix(body.Custom, "/")
 	}
 	start := time.Now()
-	items, err := fetchDoubanListWithProxy(body.Type, body.Custom, "movie", "热门", "recommend", 1, 5*time.Second)
+	items, err := fetchDoubanListWithProxy(body.Type, body.Custom, "movie", "热门", "recommend", 1, 0, 5*time.Second)
 	ms := time.Since(start).Milliseconds()
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "ms": ms, "type": body.Type, "custom": body.Custom, "error": err.Error()})

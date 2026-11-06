@@ -609,18 +609,28 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		sqlQ += ` AND title LIKE ?`
 		args = append(args, "%"+keyword+"%")
 	}
+	// 全部混合视图默认不再混短剧（短剧已有独立入口；显式选短剧、换一批、源站热门行不受影响）
+	if typ == "" && q.Get("shuffle") != "1" && q.Get("sort") != "hits_week" {
+		sqlQ += ` AND COALESCE(kind,'') != '短剧'`
+	}
 	if q.Get("shuffle") == "1" {
 		// “换一批”：约束随机，只出评分≥7 或近 3 年的，防翻出烂片
 		sqlQ += ` AND (CAST(rating AS REAL) >= 7 OR CAST(year AS INTEGER) >= 2023)`
 	}
 	// #13 sort=hits_week：源站周点击量排序（辅助榜单，不作主榜单）
+	// 默认排序改按热度（hits_week DESC）；sort=hits 与 hits_week 同序但不触发全 0 空行保护（供货架用）；
+	// sort=latest 回到最新入库，sort=rating 按评分。
 	switch {
 	case q.Get("shuffle") == "1":
 		sqlQ += ` ORDER BY RANDOM() LIMIT ?`
-	case q.Get("sort") == "hits_week":
+	case q.Get("sort") == "hits_week" || q.Get("sort") == "hits":
 		sqlQ += ` ORDER BY hits_week DESC, updated_at DESC LIMIT ?`
-	default:
+	case q.Get("sort") == "latest":
 		sqlQ += ` ORDER BY updated_at DESC LIMIT ?`
+	case q.Get("sort") == "rating":
+		sqlQ += ` ORDER BY CAST(rating AS REAL) DESC, updated_at DESC LIMIT ?`
+	default:
+		sqlQ += ` ORDER BY hits_week DESC, updated_at DESC LIMIT ?`
 	}
 	args = append(args, limit)
 	rows, err := db.Query(sqlQ, args...)
