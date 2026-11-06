@@ -334,9 +334,16 @@ function renderCatFilters(){ const c=catConfig[catKind]; document.getElementById
 async function loadCat(){ const c=catConfig[catKind]; const st=catState(catKind); const grid=document.getElementById('catGrid'); const msg=document.getElementById('catMsg'); grid.innerHTML=''; msg.textContent='正在加载…'; document.getElementById('catMore').style.display='none'; document.getElementById('catFullSearchBtn').style.display='none'; catItems=[]; catShown=30; const q=document.getElementById('catSearch').value.trim(); try{
  if(c.src==='douban'){ const catRow=c.rows[0].opts[st.cat]; const row2=c.rows[1].opts[st[c.rows[1].key]]; let tag=catRow.tag, sort=catRow.sort, regionFilter='';
   if(catKind==='综艺'){ regionFilter=row2.reg||''; } else if(row2.tag){ tag=row2.tag; }
-  let d; try{ d=await api(`/api/douban?type=${c.dbtype}&tag=${encodeURIComponent(tag)}&sort=${sort}&limit=30`); if(!d.items||!d.items.length) throw new Error('empty'); }catch(e){ msg.textContent='豆瓣拉取失败，改走目录库。'; d=await api(`/api/catalog?type=${encodeURIComponent(catKind)}&limit=30`); }
-  let items=d.items||[];
-  if(regionFilter){ const dom=r=>/中国|大陆|香港|台湾/.test(r||''); const f=items.filter(it=>regionFilter==='domestic'?dom(it.region):(it.region&&!dom(it.region))); if(f.length) items=f; else msg.textContent='这批条目没带地区信息，已显示全部。'; }
+  let d, items;
+  if(regionFilter){ // 豆瓣榜单上游已不再返回 card_subtitle（无地区信息），国内/国外改按片库地区筛
+   msg.textContent='豆瓣榜单不带地区信息，国内/国外按片库地区筛选。';
+   d=await api(`/api/catalog?type=${encodeURIComponent('综艺')}&limit=200`);
+   const all=d.items||[]; const dom=r=>/中国|大陆|香港|台湾|港台/.test(r||'');
+   items=all.filter(it=>regionFilter==='domestic'?dom(it.region):(it.region&&!dom(it.region)));
+  } else {
+   try{ d=await api(`/api/douban?type=${c.dbtype}&tag=${encodeURIComponent(tag)}&sort=${sort}&limit=30`); if(!d.items||!d.items.length) throw new Error('empty'); }catch(e){ msg.textContent='豆瓣拉取失败，改走目录库。'; d=await api(`/api/catalog?type=${encodeURIComponent(catKind)}&limit=30`); }
+   items=d.items||[];
+  }
   catItems=items;
  } else if(c.src==='catalog'){ const g=c.rows[0].opts[st.genre]; const d=await api(`/api/catalog?type=${encodeURIComponent('短剧')}&genre=${encodeURIComponent(g.genre||'')}&q=${encodeURIComponent(q)}&limit=200`); catItems=d.items||[]; if(catKind==='短剧'&&g.genre==='ai短剧'&&!catItems.length) msg.textContent='库里暂无 AI 短剧，等同步进了新源再来看看。'; }
  else if(c.src==='anime'){ const mode=c.rows[0].opts[st.mode].mode;
