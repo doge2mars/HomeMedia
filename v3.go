@@ -622,6 +622,7 @@ func handleCacheClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db.Exec(`DELETE FROM cache`)
+	metaCacheClear() // 内存里的配置缓存也清掉
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 

@@ -128,6 +128,8 @@ func main() {
 	mux.HandleFunc("/api/playrecords", auth(handlePlayRecords))
 	mux.HandleFunc("/api/favorites", auth(handleFavorites))
 	mux.HandleFunc("/api/searchhistory", auth(handleSearchHistory))
+	mux.HandleFunc("/api/search/suggest", auth(handleSearchSuggest))
+	mux.HandleFunc("/api/tmdb/trending", auth(handleTMDBTrending))
 	mux.HandleFunc("/api/live/sources", auth(handleLiveSourcesV2))
 	mux.HandleFunc("/api/live/subscribe", auth(ownerOnly(handleLiveSubscribe)))
 	mux.HandleFunc("/api/live/channels", auth(handleLiveChannelsV3))
@@ -175,6 +177,8 @@ func initDB() error {
 	}
 	// 老库迁移：kind 列不存在时补上（已存在则报错忽略），并回填空 kind
 	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN kind TEXT`)
+	// #13 源站热榜：同步时采集 vod_hits_week（周点击量），已存在则报错忽略
+	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN hits_week INTEGER NOT NULL DEFAULT 0`)
 	// 订阅带来的源归属：sources.sub_url 记订阅地址，更新订阅时只替换它带来的源
 	_, _ = db.Exec(`ALTER TABLE sources ADD COLUMN sub_url TEXT`)
 	rows, err := db.Query(`SELECT title, year, type, genre FROM catalog WHERE kind IS NULL OR kind=''`)
@@ -569,7 +573,7 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	sqlQ := `SELECT title, poster, year, region, genre, type, douban_id, rating, synopsis FROM catalog WHERE 1=1`
+	sqlQ := `SELECT title, poster, year, region, genre, type, douban_id, rating, synopsis, hits_week FROM catalog WHERE 1=1`
 	// 体育已下线（2026-11-06）：目录接口不再返回体育类条目
 	sqlQ += ` AND COALESCE(kind,'') != '体育'`
 	args := []any{}
@@ -608,9 +612,13 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		// “换一批”：约束随机，只出评分≥7 或近 3 年的，防翻出烂片
 		sqlQ += ` AND (CAST(rating AS REAL) >= 7 OR CAST(year AS INTEGER) >= 2023)`
 	}
-	if q.Get("shuffle") == "1" {
+	// #13 sort=hits_week：源站周点击量排序（辅助榜单，不作主榜单）
+	switch {
+	case q.Get("shuffle") == "1":
 		sqlQ += ` ORDER BY RANDOM() LIMIT ?`
-	} else {
+	case q.Get("sort") == "hits_week":
+		sqlQ += ` ORDER BY hits_week DESC, updated_at DESC LIMIT ?`
+	default:
 		sqlQ += ` ORDER BY updated_at DESC LIMIT ?`
 	}
 	args = append(args, limit)
@@ -621,10 +629,19 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	out := []map[string]any{}
+	maxHits := 0
 	for rows.Next() {
 		var title, poster, y, reg, gen, typ2, did, rating, syn string
-		rows.Scan(&title, &poster, &y, &reg, &gen, &typ2, &did, &rating, &syn)
-		out = append(out, map[string]any{"title": title, "poster": poster, "year": y, "region": reg, "genre": gen, "type": typ2, "douban_id": did, "rating": rating, "synopsis": syn})
+		var hitsWeek int
+		rows.Scan(&title, &poster, &y, &reg, &gen, &typ2, &did, &rating, &syn, &hitsWeek)
+		if hitsWeek > maxHits {
+			maxHits = hitsWeek
+		}
+		out = append(out, map[string]any{"title": title, "poster": poster, "year": y, "region": reg, "genre": gen, "type": typ2, "douban_id": did, "rating": rating, "synopsis": syn, "hits_week": hitsWeek})
+	}
+	if q.Get("sort") == "hits_week" && maxHits == 0 {
+		// 回填完成前全是 0，排出来只是“最新入库”，别冒充热榜：返回空行，前端跳过该行
+		out = []map[string]any{}
 	}
 	writeJSON(w, 200, map[string]any{"items": out, "count": len(out)})
 }
@@ -768,7 +785,7 @@ func handleImageProxiesSave(w http.ResponseWriter, r *http.Request) {
 		clean = append(clean, p)
 	}
 	b, _ := json.Marshal(clean)
-	if _, err := db.Exec(`INSERT INTO meta(k, v) VALUES('image_proxies', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(b)); err != nil {
+	if err := metaSet("image_proxies", string(b)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}

@@ -70,6 +70,8 @@ func imageCacheLookup(raw string) ([]byte, string, bool) {
 
 func serveImage(w http.ResponseWriter, body []byte, ct string) {
 	w.Header().Set("Content-Type", ct)
+	// #9 nosniff：防浏览器把错误类型的内容当脚本执行
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write(body)
@@ -79,19 +81,16 @@ func serveImage(w http.ResponseWriter, body []byte, ct string) {
 // 为空则读环境变量 HOME_MEDIA_IMAGE_PROXIES（逗号分隔）。直连永远先试，
 // 代理只在直连失败/超时后按顺序兜底，不是一上来就全走代理。
 func getImageProxies() []string {
-	if db != nil {
-		var v string
-		if err := db.QueryRow(`SELECT v FROM meta WHERE k='image_proxies'`).Scan(&v); err == nil && v != "" {
-			var list []string
-			if err := json.Unmarshal([]byte(v), &list); err == nil {
-				out := []string{}
-				for _, p := range list {
-					if p = strings.TrimSpace(p); p != "" {
-						out = append(out, p)
-					}
+	if v, ok := metaGet("image_proxies"); ok {
+		var list []string
+		if err := json.Unmarshal([]byte(v), &list); err == nil {
+			out := []string{}
+			for _, p := range list {
+				if p = strings.TrimSpace(p); p != "" {
+					out = append(out, p)
 				}
-				return out
 			}
+			return out
 		}
 	}
 	env := getenv("HOME_MEDIA_IMAGE_PROXIES", "")

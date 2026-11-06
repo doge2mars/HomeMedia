@@ -34,8 +34,7 @@ type upcomingConfig struct {
 
 func getUpcomingConfig() upcomingConfig {
 	cfg := upcomingConfig{Source: "manmankan"}
-	var v string
-	if err := db.QueryRow(`SELECT v FROM meta WHERE k='upcoming_config'`).Scan(&v); err == nil {
+	if v, ok := metaGet("upcoming_config"); ok {
 		json.Unmarshal([]byte(v), &cfg)
 	}
 	if cfg.Source == "" {
@@ -46,7 +45,7 @@ func getUpcomingConfig() upcomingConfig {
 
 func setUpcomingConfig(cfg upcomingConfig) {
 	b, _ := json.Marshal(cfg)
-	db.Exec(`INSERT INTO meta(k, v) VALUES('upcoming_config', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(b))
+	_ = metaSet("upcoming_config", string(b))
 }
 
 var upcomingRefreshing int32

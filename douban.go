@@ -59,13 +59,10 @@ func validDoubanProxyType(t string) bool {
 // getDoubanProxy：meta 优先，环境变量兜底，默认 direct。
 // 返回 (type, customBase)；custom 为空时按 direct 处理。
 func getDoubanProxy() (string, string) {
-	if db != nil {
-		var v string
-		if err := db.QueryRow(`SELECT v FROM meta WHERE k='douban_proxy'`).Scan(&v); err == nil && v != "" {
-			var c doubanProxyCfg
-			if err := json.Unmarshal([]byte(v), &c); err == nil && validDoubanProxyType(strings.TrimSpace(c.Type)) {
-				return strings.TrimSpace(c.Type), strings.TrimSpace(c.Custom)
-			}
+	if v, ok := metaGet("douban_proxy"); ok {
+		var c doubanProxyCfg
+		if err := json.Unmarshal([]byte(v), &c); err == nil && validDoubanProxyType(strings.TrimSpace(c.Type)) {
+			return strings.TrimSpace(c.Type), strings.TrimSpace(c.Custom)
 		}
 	}
 	t := strings.TrimSpace(getenv("HOME_MEDIA_DOUBAN_PROXY_TYPE", "direct"))
@@ -259,7 +256,7 @@ func handleDoubanProxySave(w http.ResponseWriter, r *http.Request) {
 		body.Custom = strings.TrimSuffix(body.Custom, "/")
 	}
 	b, _ := json.Marshal(body)
-	if _, err := db.Exec(`INSERT INTO meta(k, v) VALUES('douban_proxy', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(b)); err != nil {
+	if err := metaSet("douban_proxy", string(b)); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}

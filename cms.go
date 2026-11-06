@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -323,8 +323,7 @@ func validDailyTime(s string) bool {
 
 func getSyncConfig() syncConfig {
 	cfg := syncConfig{Pages: 10, Auto: false, IntervalHours: 24}
-	var v string
-	if err := db.QueryRow(`SELECT v FROM meta WHERE k='sync_config'`).Scan(&v); err == nil && v != "" {
+	if v, ok := metaGet("sync_config"); ok {
 		_ = json.Unmarshal([]byte(v), &cfg)
 	}
 	if cfg.Pages < 1 {
@@ -356,13 +355,11 @@ func setSyncConfig(cfg syncConfig) error {
 		cfg.DailyTime = ""
 	}
 	b, _ := json.Marshal(cfg)
-	_, err := db.Exec(`INSERT OR REPLACE INTO meta(k, v) VALUES('sync_config', ?)`, string(b))
-	return err
+	return metaSet("sync_config", string(b))
 }
 
 func getLastSyncUnix() int64 {
-	var v string
-	if err := db.QueryRow(`SELECT v FROM meta WHERE k='last_catalog_sync'`).Scan(&v); err == nil {
+	if v, ok := metaGet("last_catalog_sync"); ok {
 		n, _ := strconv.ParseInt(v, 10, 64)
 		return n
 	}
@@ -374,7 +371,28 @@ func syncCatalog() error { return syncCatalogWith(getSyncConfig()) }
 
 type catalogItem struct {
 	title, poster, year, region, genre, typ, rating, synopsis string
+	hitsWeek                                                  int // #13 源站周点击量（vod_hits_week）
 }
+
+// parseHits：CMS 的 vod_hits_* 可能是数字或数字字符串，容错转 int。
+func parseHits(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return int(f)
+	}
+	return 0
+}
+
+// upsertCatalogSQL：目录入库。冲突时只刷新 hits_week（取新旧最大值，
+// 防不带点击量字段的源把值清零），其余字段与 updated_at 保持原样。
+const upsertCatalogSQL = `INSERT INTO catalog(title, poster, year, region, genre, type, douban_id, rating, synopsis, updated_at, kind, hits_week) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+	ON CONFLICT(title, year, type) DO UPDATE SET hits_week=MAX(hits_week, excluded.hits_week)`
 
 // kindOf：把源站细分类归一化为货架粗分类（2026-11-04 查库实锤：type 列约 130 种
 // 细标签，网页要的“连续剧”全库仅 45 条，精确匹配下筛日本约等于 0）。
@@ -517,7 +535,7 @@ func syncCatalogWith(cfg syncConfig) error {
 						if typ == "" {
 							typ = c.Name
 						}
-						catItems = append(catItems, catalogItem{title, sField(m, "vod_pic", "pic"), sField(m, "vod_year", "year"), sField(m, "vod_area"), sField(m, "vod_class"), typ, sField(m, "vod_score"), sField(m, "vod_blurb", "vod_content")})
+						catItems = append(catItems, catalogItem{title, sField(m, "vod_pic", "pic"), sField(m, "vod_year", "year"), sField(m, "vod_area"), sField(m, "vod_class"), typ, sField(m, "vod_score"), sField(m, "vod_blurb", "vod_content"), parseHits(sField(m, "vod_hits_week", "vod_hits_day", "vod_hits"))})
 					}
 				}
 				// 每类写完立刻落库（写库串行加锁）：长同步中途也能看到库在涨，中断也不白跑
@@ -526,8 +544,11 @@ func syncCatalogWith(cfg syncConfig) error {
 					if isSportsKind(it.typ, it.genre) {
 						continue // 体育已下线：不同步入库
 					}
-					_, _ = db.Exec(`INSERT OR IGNORE INTO catalog(title, poster, year, region, genre, type, douban_id, rating, synopsis, updated_at, kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-						it.title, it.poster, it.year, it.region, it.genre, it.typ, "", it.rating, it.synopsis, now, kindOf(it.typ, it.genre))
+					// #13 同步顺带回填 hits_week：已入库的旧行只更新点击量，updated_at 不动（不打乱“最新入库”排序）。
+					// 取 MAX 而不是直接覆盖：同一标题多源都有，不带点击量字段的源会报 0，
+					// 直接覆盖会把别的源已填的值清零（实测 2026-11-06 回填中 7166→7155）。
+					_, _ = db.Exec(upsertCatalogSQL,
+						it.title, it.poster, it.year, it.region, it.genre, it.typ, "", it.rating, it.synopsis, now, kindOf(it.typ, it.genre), it.hitsWeek)
 				}
 				mu.Unlock()
 			}
@@ -535,6 +556,7 @@ func syncCatalogWith(cfg syncConfig) error {
 	}
 	wg.Wait()
 	db.Exec(`INSERT OR REPLACE INTO meta(k, v) VALUES('last_catalog_sync', ?)`, strconv.FormatInt(now, 10))
+	metaInvalidate("last_catalog_sync")
 	// 同步完立即后台预取海报，货架第一次打开就不用等源站 CDN
 	go prefetchCatalogPosters()
 	return nil

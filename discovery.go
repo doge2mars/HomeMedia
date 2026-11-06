@@ -93,6 +93,32 @@ func handleCatalogRelated(w http.ResponseWriter, r *http.Request) {
 // 全家 playrecords 按标题聚合：完成度（play_time/total_time，上限 1，无总时长记 0.3）
 // × 最近 7 天线性时间衰减（今天 1，7 天前 0），取 Top N。7 天内没人看过就返回空 items，
 // 前端回退到豆瓣周榜。save_time 是毫秒（Date.now()）。
+// handleSearchSuggest：GET /api/search/suggest?q=... —— 搜索联想，
+// 本地 catalog 标题前缀匹配，零外部依赖；返回最多 8 个标题。
+func handleSearchSuggest(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, 200, map[string]any{"items": []string{}})
+		return
+	}
+	// LIKE 通配符转义（%/_ 不能当通配符用）
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+	rows, err := db.Query(`SELECT DISTINCT title FROM catalog WHERE title LIKE ? ESCAPE '\' AND COALESCE(kind,'') != '体育' ORDER BY hits_week DESC, updated_at DESC LIMIT 8`, esc+"%")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var t string
+		if rows.Scan(&t) == nil && t != "" {
+			out = append(out, t)
+		}
+	}
+	writeJSON(w, 200, map[string]any{"items": out})
+}
+
 func handleTrendingHousehold(w http.ResponseWriter, r *http.Request) {
 	limit := 8
 	if v := r.URL.Query().Get("limit"); v != "" {
