@@ -761,7 +761,43 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 		}
 		genres = append(genres, p.k)
 	}
-	writeJSON(w, 200, map[string]any{"regions": regions, "genres": genres})
+	// 各 kind 计数（货架浏览页分类卡用；体育不计入；与 ?type= 无关，恒为全局数）。
+	kindCounts := []map[string]any{}
+	if rows, err := db.Query(`SELECT kind, COUNT(*) c FROM catalog WHERE COALESCE(kind,'') != '体育' AND kind != '' GROUP BY kind ORDER BY c DESC`); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var k string
+			var c int
+			if err := rows.Scan(&k, &c); err != nil {
+				continue
+			}
+			kindCounts = append(kindCounts, map[string]any{"kind": k, "count": c})
+		}
+	}
+	// 年份列表（货架筛选年份 pill 用；跟 ?type= 走，与地区/类型同一口径）。
+	yearQ := `SELECT year FROM catalog WHERE year != '' AND COALESCE(kind,'') != '体育'`
+	yearArgs := []any{}
+	if kindFilter != "" {
+		yearQ += ` AND kind=?`
+		yearArgs = append(yearArgs, kindFilter)
+	}
+	if typeFilter != "" {
+		yearQ += ` AND type=?`
+		yearArgs = append(yearArgs, typeFilter)
+	}
+	yearQ += ` GROUP BY year ORDER BY year DESC LIMIT 12`
+	years := []string{}
+	if rows, err := db.Query(yearQ, yearArgs...); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var y string
+			if err := rows.Scan(&y); err != nil {
+				continue
+			}
+			years = append(years, y)
+		}
+	}
+	writeJSON(w, 200, map[string]any{"regions": regions, "genres": genres, "kinds": kindCounts, "years": years})
 }
 
 // handleImageProxiesGet/Save：服务端拉图代理列表（设置页“图片代理”组）。
