@@ -775,7 +775,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// 年份列表（货架筛选年份 pill 用；跟 ?type= 走，与地区/类型同一口径）。
-	yearQ := `SELECT year FROM catalog WHERE year != '' AND COALESCE(kind,'') != '体育'`
+	yearQ := `SELECT year FROM catalog WHERE year != '' AND COALESCE(kind,'') != '体育' AND year GLOB '[0-9][0-9][0-9][0-9]' AND CAST(year AS INTEGER) BETWEEN 1900 AND 2030`
 	yearArgs := []any{}
 	if kindFilter != "" {
 		yearQ += ` AND kind=?`

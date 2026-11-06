@@ -16,6 +16,7 @@ func TestCatalogMetaKindsYears(t *testing.T) {
 		{"片C", "剧集", "2023"},
 		{"片D", "短剧", "2025"},
 		{"片E", "体育", "2024"},
+		{"片F", "综艺", "韩国"},
 	}
 	for _, s := range seed {
 		if _, err := db.Exec(`INSERT INTO catalog(title, poster, year, region, genre, type, douban_id, rating, synopsis, updated_at, kind) VALUES(?, '', ?, '', '', '', '', '', '', 0, ?)`, s.title, s.year, s.kind); err != nil {
@@ -38,7 +39,7 @@ func TestCatalogMetaKindsYears(t *testing.T) {
 		m, _ := kv.(map[string]any)
 		got[m["kind"].(string)] = m["count"].(float64)
 	}
-	if got["电影"] != 2 || got["剧集"] != 1 || got["短剧"] != 1 {
+	if got["电影"] != 2 || got["剧集"] != 1 || got["短剧"] != 1 || got["综艺"] != 1 {
 		t.Errorf("kinds = %v", got)
 	}
 	if _, ok := got["体育"]; ok {
@@ -47,6 +48,11 @@ func TestCatalogMetaKindsYears(t *testing.T) {
 	years, _ := body["years"].([]any)
 	if len(years) != 3 {
 		t.Errorf("years = %v, want 3 distinct years", years)
+	}
+	for _, y := range years {
+		if y == "韩国" {
+			t.Errorf("years = %v, garbage year leaked into list", years)
+		}
 	}
 	if len(years) > 0 && years[0] != "2025" {
 		t.Errorf("years[0] = %v, want 2025 (desc)", years[0])
