@@ -31,6 +31,7 @@ section{margin:28px 0} h2{font-size:20px;font-weight:700;margin:14px 0 12px}
 .catentry{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 18px;height:56px;cursor:pointer;font-size:15px;color:var(--txt);transition:border-color .2s,background .2s}
 .catentry:hover{border-color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.04)}
 .catentry b{font-size:20px;line-height:1}
+#greetLine{height:44px;display:flex;align-items:center;font-size:17px;font-weight:600}
 .cattitle{font-size:32px;font-weight:800;margin:6px 0 4px}
 .catsub{color:var(--mut);font-size:15px;margin-bottom:8px}
 .catfilter{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:8px 20px;margin:14px 0}
@@ -115,6 +116,7 @@ details summary span{color:var(--mut);font-weight:400;font-size:13px;margin-left
 <!-- 首页：全宽 Netflix 式布局；问候横幅已取消（2026-11-06 用户定：直接去掉，内容置顶），首页顶部改为五分类入口 -->
 <div id="view-home" class="view on">
 <!-- 首页五入口：照搬电视端顺序与图标；“换一批”小入口接替横幅里的按钮（其余两个动作本来就在导航栏：货架/我的） -->
+<div id="greetLine"><span id="greetTitle">你好</span></div>
 <section id="catEntriesSec"><div class="catentries">
 <button class="catentry" onclick="openCat('电影')"><b>🎬</b>电影</button>
 <button class="catentry" onclick="openCat('剧集')"><b>📺</b>剧集</button>
@@ -281,7 +283,8 @@ function stopPlayback(){ directPlayWaiting=false; dpSeq++; const ov=document.get
 function showView(v, btn){ if(v!=='detail') stopPlayback(); document.querySelectorAll('.view').forEach(e=>e.classList.remove('on')); document.getElementById('view-'+v).classList.add('on'); document.querySelectorAll('header nav button').forEach(b=>b.classList.remove('on')); if(btn) btn.classList.add('on'); else { const nb=document.querySelector(`header nav button[data-view="${v}"]`); if(nb) nb.classList.add('on'); } window.scrollTo(0,0); if(v==='home'){ loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); } if(v==='shelf'){ markShelfTab(); if(!shelfItems.length) loadCatalog(); } if(v==='fav'){ loadWants(); loadFav(); loadContinueInto('favContinue'); } if(v==='upcoming'){ loadUpcomingPage(); } if(v==='live'){ loadLive(); } if(v==='settings'){ loadSettings(); loadUsers(); loadUserSettings(); loadSyncConfig(); loadUpcomingConfig(); loadImageProxies(); loadDoubanProxy(); } }
 function posterUrl(p){ if(!p) return ''; return p.startsWith('http') ? '/api/image-proxy?url='+encodeURIComponent(p) : p; }
 function card(item, onclick, extra){ const d=document.createElement('div'); d.className='card'; const rating=(item.rating&&item.rating!=='0'&&item.rating!=='0.0')?`<span class="rating">★ ${item.rating}</span>`:''; const epbadge=item.epBadge?`<span class="epbadge">${item.epBadge}</span>`:''; const chip=item.sourceChip?`<div><span class="sourcechip">${item.sourceChip}</span></div>`:''; const prog=(item.progress!==undefined&&item.progress!==null)?`<div class="progressbar"><i style="width:${Math.round(Math.min(1,Math.max(0,item.progress))*100)}%"></i></div>`:''; const dpBtn=(item.progress===undefined)?`<button class="cardplay" onclick="event.stopPropagation();directPlay('${(item.title||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">▶</button>`:''; d.innerHTML=`${rating}${epbadge}${dpBtn}<img loading="lazy" src="${posterUrl(item.poster||item.cover||'')}" onerror="this.style.display='none'"><div>${item.title}<br><small>${item.year||''} ${item.type||item.type_name||''} ${item.source_name||''} ${item.nsrc?('· '+item.nsrc+'个源'):''}</small>${chip}${prog}${extra||''}</div>`; d.onclick=onclick; return d; }
-async function doLogin(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; toast('登录成功'); loadUserSpeed(); homeLoaded=false; loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); }catch(e){ toast('登录失败：'+e.message); } }
+function updateGreeting(){ const who=document.getElementById('who').textContent.replace('已登录：','').trim(); const h=new Date().getHours(); const g=h<6?'夜深了':h<12?'上午好':h<14?'中午好':h<18?'下午好':'晚上好'; const el=document.getElementById('greetTitle'); if(el) el.textContent=`${g}，${who||'你'} 👋`; }
+async function doLogin(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; toast('登录成功'); updateGreeting(); loadUserSpeed(); homeLoaded=false; loadHome(); loadContinueInto('continueGrid'); loadUpcoming(); loadWantBadge(); }catch(e){ toast('登录失败：'+e.message); } }
 async function doLogout(){ try{ await api('/api/logout',{method:'POST'}); }catch(e){} location.reload(); }
 async function doRegister(){ try{ const u=document.getElementById('u').value, p=document.getElementById('p').value; const d=await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})}); document.getElementById('who').textContent='已登录：'+d.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; toast('注册并登录成功'); }catch(e){ toast('注册失败：'+e.message); } }
 let shelfItems=[], shelfShown=0;
@@ -632,7 +635,7 @@ async function loadShelfMeta(type){
     (d.regions||[]).forEach(v=>{ const o=document.createElement('option'); o.value=v; rg.appendChild(o); });
   }catch(e){}
 }
-['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{});
+updateGreeting(); ['fyear','fgenre','fregion'].forEach(id=>{ const el=document.getElementById(id); if(el) bindDatalist(el); }); loadShelfMeta().catch(()=>{});
 // 开机先认已有的登录 Cookie：有效就直接进首页，不用每次刷新都重新登录；
 // 失效（401）才留着登录框等用户登录。
 (async()=>{ try{ const me=await api('/api/me'); document.getElementById('who').textContent='已登录：'+me.username; document.getElementById('logoutBtn').style.display=''; document.getElementById('login').style.display='none'; loadUserSpeed(); loadHome().catch(()=>{}); loadContinueInto('continueGrid').catch(()=>{}); loadUpcoming().catch(()=>{}); loadWantBadge().catch(()=>{}); }catch(e){} })();
