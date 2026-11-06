@@ -413,6 +413,19 @@ func isSportsKind(typ, genre string) bool {
 	return false
 }
 
+// isAdultContent：源站细分类/题材是否成人内容（2026-11-06 清理）。
+// 与库里清理口径一致：type 含伦理/三级，或 type 恰为福利，或 genre 含成人/情色。
+// 注意：genre 里的年份数字（如 2018）不是成人标记，不要按数字判。
+func isAdultContent(typ, genre string) bool {
+	if strings.Contains(typ, "伦理") || strings.Contains(typ, "三级") || typ == "福利" {
+		return true
+	}
+	if strings.Contains(genre, "成人") || strings.Contains(genre, "情色") {
+		return true
+	}
+	return false
+}
+
 func kindOf(typ, genre string) string {
 	s := typ + " " + genre
 	has := func(subs ...string) bool {
@@ -543,6 +556,9 @@ func syncCatalogWith(cfg syncConfig) error {
 				for _, it := range catItems {
 					if isSportsKind(it.typ, it.genre) {
 						continue // 体育已下线：不同步入库
+					}
+					if isAdultContent(it.typ, it.genre) {
+						continue // 成人内容不入库（2026-11-06 清理）
 					}
 					// #13 同步顺带回填 hits_week：已入库的旧行只更新点击量，updated_at 不动（不打乱“最新入库”排序）。
 					// 取 MAX 而不是直接覆盖：同一标题多源都有，不带点击量字段的源会报 0，
