@@ -461,6 +461,7 @@ async function openTitle(title){
     const d=JSON.parse(ev.data);
     if(d.type==='start'){ document.getElementById('aggProgress').textContent=`正在聚合 ${d.totalSources} 个源…先到的先出现。`; return; }
     if(d.type==='source'){
+      if(curSources.some(s=>s.source===d.source.source)) return;
       curSources.push(d.source);
       if(directPlayWaiting){ directPlayWaiting=false; playSrc(curSources.length-1, cur?cur.index:0); }
       const s=curSources[0];
@@ -518,6 +519,7 @@ function directPlay(title){
     if(mySeq!==dpSeq) return;
     const d=JSON.parse(ev.data);
     if(d.type==='source'){
+      if(curSources.some(s=>s.source===d.source.source)) return;
       curSources.push(d.source);
       if(directPlayWaiting){ directPlayWaiting=false; playSrc(curSources.length-1, cur?cur.index:0); renderPlayerTabs(); return; }
       if(played) renderPlayerTabs();
