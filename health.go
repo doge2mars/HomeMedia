@@ -122,15 +122,18 @@ func autoDisableSource(key string) {
 		log.Printf("health: auto-disable %s failed: %v", key, err)
 		return
 	}
+	addHealthDisabled(key)
+	log.Printf("health: source %s auto-disabled after %d consecutive search failures (retest every %v)", key, healthFailThreshold, healthRetestInterval)
+}
+
+func addHealthDisabled(key string) {
 	keys := getHealthDisabled()
 	for _, k := range keys {
 		if k == key {
-			log.Printf("health: source %s auto-disabled after %d consecutive search failures (retest every %v)", key, healthFailThreshold, healthRetestInterval)
 			return
 		}
 	}
 	setHealthDisabled(append(keys, key))
-	log.Printf("health: source %s auto-disabled after %d consecutive search failures (retest every %v)", key, healthFailThreshold, healthRetestInterval)
 }
 
 // getHealthDisabled/setHealthDisabled：meta.health_disabled（JSON 数组），

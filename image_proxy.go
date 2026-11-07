@@ -12,10 +12,47 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+var (
+	imgNegMu       sync.Mutex
+	imgNegCache    = map[string]time.Time{}
+	imgNegTTL      = 5 * time.Minute
+	imgPruneRun    int32
+	imageCacheMax  int64 = 1 << 30     // 1GB 上限
+	imageCacheTrim int64 = 768 << 20   // 淘汰至 750MB
+)
+
+func imgNegHit(raw string) bool {
+	imgNegMu.Lock()
+	defer imgNegMu.Unlock()
+	exp, ok := imgNegCache[raw]
+	if !ok {
+		return false
+	}
+	if time.Now().After(exp) {
+		delete(imgNegCache, raw)
+		return false
+	}
+	return true
+}
+
+func imgNegSet(raw string) {
+	imgNegMu.Lock()
+	imgNegCache[raw] = time.Now().Add(imgNegTTL)
+	imgNegMu.Unlock()
+}
+
+func resetImageNegCache() {
+	imgNegMu.Lock()
+	imgNegCache = map[string]time.Time{}
+	imgNegMu.Unlock()
+}
 
 // /api/image-proxy?url=<图片地址> —— 借 image-proxy 的机制，并扩展到所有海报
 // 只给豆瓣/Bangumi/manmankan 走这条路，源站海报它也是直连；
@@ -57,7 +94,8 @@ func imageCacheLookup(raw string) ([]byte, string, bool) {
 	cacheDir := filepath.Join(dataDir, "image-cache")
 	sum := sha256.Sum256([]byte(raw))
 	key := hex.EncodeToString(sum[:])
-	b, err := os.ReadFile(filepath.Join(cacheDir, key+".bin"))
+	binPath := filepath.Join(cacheDir, key+".bin")
+	b, err := os.ReadFile(binPath)
 	if err != nil {
 		return nil, "", false
 	}
@@ -65,6 +103,8 @@ func imageCacheLookup(raw string) ([]byte, string, bool) {
 	if err != nil {
 		return nil, "", false
 	}
+	now := time.Now()
+	_ = os.Chtimes(binPath, now, now)
 	return b, strings.TrimSpace(string(ct)), true
 }
 
@@ -112,8 +152,14 @@ func fetchImageOnce(raw string, proxyURL string, timeout time.Duration) ([]byte,
 		return nil, "", err
 	}
 	req, _ := http.NewRequest("GET", raw, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
-	req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	// 伪装真实 Chrome UA，避免触发腾讯云 EdgeOne / 豆瓣图床机器人挑战页（200 text/html）
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+	ref := u.Scheme + "://" + u.Host + "/"
+	if strings.Contains(strings.ToLower(u.Host), "doubanio.com") {
+		// 豆瓣图床防盗链只认 movie.douban.com，传 img*.doubanio.com 会被拦或触发挑战页
+		ref = "https://movie.douban.com/"
+	}
+	req.Header.Set("Referer", ref)
 	req.Header.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
 	tr := &http.Transport{}
 	if proxyURL != "" {
@@ -140,18 +186,24 @@ func fetchImageOnce(raw string, proxyURL string, timeout time.Duration) ([]byte,
 	if err != nil {
 		return nil, "", err
 	}
+	if len(body) == 0 {
+		return nil, "", fmt.Errorf("empty image")
+	}
 	return body, ct, nil
 }
 
 // fetchAndCache：命中磁盘缓存直接回，否则先直连、失败再按设置里的代理顺序重试，
-// 成功才落盘；供代理和目录同步预取共用
+// 成功才落盘；失败记 5 分钟内存负缓存，防止同一死图反复拖慢页面；供代理和目录同步预取共用
 func fetchAndCache(raw string) ([]byte, string, error) {
-	_, err := url.Parse(raw)
+	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, "", err
 	}
 	if b, ct, ok := imageCacheLookup(raw); ok {
 		return b, ct, nil
+	}
+	if imgNegHit(raw) {
+		return nil, "", fmt.Errorf("negative cached")
 	}
 	dataDir := getenv("HOME_MEDIA_DATA", "/opt/home-media/data")
 	cacheDir := filepath.Join(dataDir, "image-cache")
@@ -170,14 +222,74 @@ func fetchAndCache(raw string) ([]byte, string, error) {
 			}
 		}
 	}
+	// 豆瓣图床若因 IP 被 EdgeOne 挑战拦下（not an image），尝试公共图片镜像 wsrv.nl 兜底一次
+	if err != nil && strings.Contains(strings.ToLower(u.Host), "doubanio.com") {
+		mirror := "https://wsrv.nl/?url=" + url.QueryEscape(raw)
+		if b2, ct2, err2 := fetchImageOnce(mirror, "", 5*time.Second); err2 == nil {
+			body, ct, err = b2, ct2, nil
+		}
+	}
 	if err != nil {
+		imgNegSet(raw)
 		// 海报拉不到要有迹可查：记 URL + 上游状态/错误（海报地址不含敏感信息）
 		log.Printf("image-proxy: fetch failed url=%s err=%v", raw, err)
 		return nil, "", err
 	}
 	_ = os.WriteFile(bodyPath, body, 0o644)
 	_ = os.WriteFile(metaPath, []byte(ct), 0o644)
+	pruneImageCacheAsync()
 	return body, ct, nil
+}
+
+// pruneImageCache：海报磁盘缓存超 imageCacheMax（默认 1GB）时，按 .bin 最近访问/修改时间淘汰最旧文件对（.bin+.meta），直到低于 imageCacheTrim（750MB）。
+func pruneImageCache() {
+	dir := filepath.Join(getenv("HOME_MEDIA_DATA", "/opt/home-media/data"), "image-cache")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var total int64
+	type fi struct {
+		base string
+		size int64
+		mod  time.Time
+	}
+	var files []fi
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".bin") {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			sz := info.Size()
+			total += sz
+			base := filepath.Join(dir, strings.TrimSuffix(name, ".bin"))
+			files = append(files, fi{base: base, size: sz, mod: info.ModTime()})
+		}
+	}
+	if total <= imageCacheMax {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
+	for _, f := range files {
+		if total <= imageCacheTrim {
+			break
+		}
+		if err := os.Remove(f.base + ".bin"); err == nil {
+			_ = os.Remove(f.base + ".meta")
+			total -= f.size
+		}
+	}
+}
+
+func pruneImageCacheAsync() {
+	if !atomic.CompareAndSwapInt32(&imgPruneRun, 0, 1) {
+		return
+	}
+	go func() {
+		defer atomic.StoreInt32(&imgPruneRun, 0)
+		pruneImageCache()
+	}()
 }
 
 // imageProbeResult：单个图片代理的测试结果。
@@ -248,10 +360,11 @@ func handleImageProxiesTest(w http.ResponseWriter, r *http.Request) {
 // 按分类各取最新 150 张（ORDER BY updated_at DESC）：以前无序取前 300 张，暖到的常是旧数据，
 // 用户实际逛的分类首页和首页行反而是冷的。去重后总量约千张，后台跑，不阻塞任何请求。
 func prefetchCatalogPosters() {
-	if db == nil {
+	curDB := db
+	if curDB == nil {
 		return
 	}
-	kinds, err := db.Query(`SELECT DISTINCT kind FROM catalog WHERE kind != ''`)
+	kinds, err := curDB.Query(`SELECT DISTINCT kind FROM catalog WHERE kind != ''`)
 	if err != nil {
 		return
 	}
@@ -266,7 +379,7 @@ func prefetchCatalogPosters() {
 	seen := map[string]bool{}
 	var urls []string
 	for _, k := range kindList {
-		rows, err := db.Query(`SELECT poster FROM catalog WHERE kind = ? AND poster LIKE 'http%' ORDER BY updated_at DESC LIMIT 150`, k)
+		rows, err := curDB.Query(`SELECT poster FROM catalog WHERE kind = ? AND poster LIKE 'http%' ORDER BY updated_at DESC LIMIT 150`, k)
 		if err != nil {
 			continue
 		}

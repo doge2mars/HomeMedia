@@ -40,6 +40,7 @@ func resetHealthState() {
 	negCache = map[string]time.Time{}
 	negMu.Unlock()
 	resetProbeCacheForTest()
+	resetAggCache()
 }
 
 func TestNegCacheSetHitExpiry(t *testing.T) {
@@ -329,5 +330,73 @@ func TestProbeSourceHealthRejectsSlowSource(t *testing.T) {
 	}
 	if d := time.Since(start); d > 11*time.Second {
 		t.Fatalf("probe took %v, want ~10s timeout", d)
+	}
+}
+
+func TestDisableFailedEntersRetestAndRecovers(t *testing.T) {
+	openTestDB(t)
+	resetHealthState()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":1,"list":[{"vod_id":"1","vod_name":"繁花","vod_play_url":"第1集$http://example.com/1.m3u8"}]}`)
+	}))
+	defer srv.Close()
+	if _, err := db.Exec(`INSERT INTO sources(key, name, api, disabled) VALUES('s_rec','可恢复源',?,0)`, srv.URL+"/api.php/provide/vod/"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/sources/disable-failed", strings.NewReader(`{"keys":["s_rec"]}`))
+	rec := httptest.NewRecorder()
+	handleSourcesDisableFailed(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("disable-failed status=%d", rec.Code)
+	}
+	// 必须进入 health_disabled，6 小时复测才能救回来
+	out := retestHealthSources()
+	if len(out) != 1 || !out[0].OK || out[0].Action != "reenabled" {
+		t.Fatalf("retest after disable-failed = %+v, want reenabled", out)
+	}
+	var dis int
+	_ = db.QueryRow(`SELECT disabled FROM sources WHERE key='s_rec'`).Scan(&dis)
+	if dis != 0 {
+		t.Fatalf("source still disabled after retest recovery")
+	}
+}
+
+func TestSpeedTestSourceRejectsErrorPageAndSharesCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME_MEDIA_DATA", dir)
+	resetHealthState()
+	var segHits int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/bad.m3u8", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "#EXTM3U\n#EXTINF:10,\n/bad.ts\n")
+	})
+	mux.HandleFunc("/bad.ts", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		fmt.Fprint(w, "<html><body>EdgeOne Challenge</body></html>")
+	})
+	mux.HandleFunc("/ok.m3u8", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1920x1080\n/ok-v.m3u8\n")
+	})
+	mux.HandleFunc("/ok-v.m3u8", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "#EXTM3U\n#EXTINF:10,\n/ok.ts\n")
+	})
+	mux.HandleFunc("/ok.ts", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&segHits, 1)
+		_, _ = w.Write(make([]byte, 64<<10))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	if _, _, _, err := speedTestSource(context.Background(), []string{srv.URL + "/bad.m3u8"}); err == nil {
+		t.Fatal("speedTestSource must reject HTML error page disguised as segment")
+	}
+	sp, res, _, err := speedTestSource(context.Background(), []string{srv.URL + "/ok.m3u8"})
+	if err != nil || sp <= 0 || res != "1920x1080" {
+		t.Fatalf("speedTestSource ok = %v, %q, %v", sp, res, err)
+	}
+	// 再调一次必须命中 probeCache，不再请求分片
+	_, _, _, err2 := speedTestSource(context.Background(), []string{srv.URL + "/ok.m3u8"})
+	if err2 != nil || atomic.LoadInt32(&segHits) != 1 {
+		t.Fatalf("segHits=%d err=%v, want 1 (probeCache hit)", segHits, err2)
 	}
 }

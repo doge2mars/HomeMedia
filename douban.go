@@ -126,9 +126,30 @@ func fetchDoubanList(doubanType, tag, sort string, limit, start int) ([]map[stri
 	return fetchDoubanListTimeout(doubanType, tag, sort, limit, start, 10*time.Second)
 }
 
+var doubanFallbackOrder = []string{"tencent", "ali", "zwei", "direct"}
+
 // fetchDoubanListTimeout：同上，可指定超时（代理测试用 5 秒）。
+// 主档位失败时自动依次降级尝试备用档位（tencent -> ali -> zwei -> direct），避免单档挂掉导致豆瓣榜单全灭。
 func fetchDoubanListTimeout(doubanType, tag, sort string, limit, start int, timeout time.Duration) ([]map[string]any, error) {
-	return fetchDoubanURL(doubanListURL(doubanType, tag, sort, limit, start), doubanType, timeout)
+	primaryType, primaryCustom := getDoubanProxy()
+	items, err := fetchDoubanURL(doubanListURLWith(primaryType, primaryCustom, doubanType, tag, sort, limit, start), doubanType, timeout)
+	if err == nil && len(items) > 0 {
+		return items, nil
+	}
+	fbTimeout := 4 * time.Second
+	if timeout < fbTimeout {
+		fbTimeout = timeout
+	}
+	for _, fbType := range doubanFallbackOrder {
+		if fbType == primaryType {
+			continue
+		}
+		fbItems, fbErr := fetchDoubanURL(doubanListURLWith(fbType, "", doubanType, tag, sort, limit, start), doubanType, fbTimeout)
+		if fbErr == nil && len(fbItems) > 0 {
+			return fbItems, nil
+		}
+	}
+	return items, err
 }
 
 // fetchDoubanListWithProxy：用指定档位（未保存的也行，供代理测试）拉榜单。

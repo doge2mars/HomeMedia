@@ -67,11 +67,15 @@ func handleCatalogRelated(w http.ResponseWriter, r *http.Request) {
 	reg := strings.TrimPrefix(region, "中国")
 	var rows *sql.Rows
 	var err error
+	restFilter := ""
+	if !isRestrictedUnlocked(r) {
+		restFilter = ` AND COALESCE(restricted,0) = 0 AND COALESCE(kind,'') != '其他'`
+	}
 	if kind != "" {
-		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND kind=? AND COALESCE(kind,'') != '体育' ORDER BY (type=?) DESC, (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
+		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND kind=? AND COALESCE(kind,'') != '体育'`+restFilter+` ORDER BY (type=?) DESC, (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
 			title, kind, typ, "%"+reg+"%", year, limit)
 	} else {
-		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND type=? AND COALESCE(kind,'') != '体育' ORDER BY (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
+		rows, err = db.Query(`SELECT title, poster, year, region, genre, type, rating FROM catalog WHERE title<>? AND type=? AND COALESCE(kind,'') != '体育'`+restFilter+` ORDER BY (region LIKE ?) DESC, (year=?) DESC, RANDOM() LIMIT ?`,
 			title, typ, "%"+reg+"%", year, limit)
 	}
 	if err != nil {
@@ -103,7 +107,11 @@ func handleSearchSuggest(w http.ResponseWriter, r *http.Request) {
 	}
 	// LIKE 通配符转义（%/_ 不能当通配符用）
 	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
-	rows, err := db.Query(`SELECT DISTINCT title FROM catalog WHERE title LIKE ? ESCAPE '\' AND COALESCE(kind,'') != '体育' ORDER BY hits_week DESC, updated_at DESC LIMIT 8`, esc+"%")
+	restFilter := ""
+	if !isRestrictedUnlocked(r) {
+		restFilter = ` AND COALESCE(restricted,0) = 0 AND COALESCE(kind,'') != '其他'`
+	}
+	rows, err := db.Query(`SELECT DISTINCT title FROM catalog WHERE title LIKE ? ESCAPE '\' AND COALESCE(kind,'') != '体育'`+restFilter+` ORDER BY hits_week DESC, updated_at DESC LIMIT 8`, esc+"%")
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return

@@ -8,6 +8,7 @@ package main
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -102,7 +103,7 @@ func main() {
 	mux.HandleFunc("/api/douban-proxy", auth(handleDoubanProxyGet))
 	mux.HandleFunc("/api/douban-proxy/save", auth(ownerOnly(handleDoubanProxySave)))
 	mux.HandleFunc("/api/douban-proxy/test", auth(ownerOnly(handleDoubanProxyTest)))
-	mux.HandleFunc("/api/catalog/sync", auth(handleCatalogSync))
+	mux.HandleFunc("/api/catalog/sync", auth(ownerOnly(handleCatalogSync)))
 	mux.HandleFunc("/api/catalog/meta", auth(handleCatalogMeta))
 	mux.HandleFunc("/api/image-proxies", auth(handleImageProxiesGet))
 	mux.HandleFunc("/api/image-proxies/save", auth(ownerOnly(handleImageProxiesSave)))
@@ -142,6 +143,10 @@ func main() {
 	mux.HandleFunc("/api/upcoming", auth(handleUpcoming))
 	mux.HandleFunc("/api/upcoming-config", auth(handleUpcomingConfig))
 	mux.HandleFunc("/api/wants", auth(handleWants))
+	mux.HandleFunc("/api/restricted/status", auth(handleRestrictedStatus))
+	mux.HandleFunc("/api/restricted/unlock", auth(handleRestrictedUnlock))
+	mux.HandleFunc("/api/restricted/lock", auth(handleRestrictedLock))
+	mux.HandleFunc("/api/restricted/pin", auth(ownerOnly(handleRestrictedPinSave)))
 
 	log.Printf("HomeMedia v0.1 listening on :%s (LAN + Tailscale), data=%s", port, dataDir)
 	log.Printf("default admin: admin / admin123 (change via HOME_MEDIA_ADMIN_PASS env on first run, or change-password after login)")
@@ -180,6 +185,8 @@ func initDB() error {
 	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN kind TEXT`)
 	// #13 源站热榜：同步时采集 vod_hits_week（周点击量），已存在则报错忽略
 	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN hits_week INTEGER NOT NULL DEFAULT 0`)
+	// 受限内容锁（4 位 PIN）：标记“其他”分类及落入电影等分类的福利/伦理等敏感条目
+	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN restricted INTEGER NOT NULL DEFAULT 0`)
 	// 订阅带来的源归属：sources.sub_url 记订阅地址，更新订阅时只替换它带来的源
 	_, _ = db.Exec(`ALTER TABLE sources ADD COLUMN sub_url TEXT`)
 	rows, err := db.Query(`SELECT title, year, type, genre FROM catalog WHERE kind IS NULL OR kind=''`)
@@ -200,7 +207,28 @@ func initDB() error {
 	return nil
 }
 
+func ensureCookieSecret() {
+	envSec := strings.TrimSpace(os.Getenv("HOME_MEDIA_SECRET"))
+	if envSec != "" && envSec != "home-media-dev-secret-change-me" {
+		secret = []byte(envSec)
+		return
+	}
+	if v, ok := metaGet("cookie_secret"); ok && len(v) >= 32 {
+		secret = []byte(v)
+		return
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err == nil {
+		gen := hex.EncodeToString(buf)
+		_ = metaSet("cookie_secret", gen)
+		secret = []byte(gen)
+		return
+	}
+	secret = []byte("home-media-dev-secret-change-me")
+}
+
 func seed() {
+	ensureCookieSecret()
 	adminPass := getenv("HOME_MEDIA_ADMIN_PASS", "admin123")
 	h := hashPass("admin", adminPass)
 	db.Exec(`INSERT OR IGNORE INTO users(username, passhash, role, created_at) VALUES('admin', ?, 'owner', ?)`, h, time.Now().Unix())
@@ -211,6 +239,23 @@ func seed() {
 	}
 	for _, d := range defaults {
 		db.Exec(`INSERT OR IGNORE INTO sources(key, name, api, disabled) VALUES(?, ?, ?, 0)`, d[0], d[1], d[2])
+	}
+	// 历史兼容：此前点“禁用测试失败的源”停用的源未进 health_disabled，一次性补齐，让 6 小时复测能捞回它们
+	if _, ok := metaGet("health_disabled_backfilled"); !ok {
+		if rows, err := db.Query(`SELECT key FROM sources WHERE disabled=1`); err == nil {
+			var keys []string
+			for rows.Next() {
+				var k string
+				if rows.Scan(&k) == nil && k != "" {
+					keys = append(keys, k)
+				}
+			}
+			rows.Close()
+			for _, k := range keys {
+				addHealthDisabled(k)
+			}
+		}
+		_ = metaSet("health_disabled_backfilled", "1")
 	}
 }
 
@@ -278,7 +323,7 @@ func setAuthCookies(w http.ResponseWriter, username, role string) {
 	payload, _ := json.Marshal(map[string]any{"username": username, "role": role, "signature": sign(username), "timestamp": time.Now().UnixMilli()})
 	val := url.QueryEscape(string(payload))
 	for _, name := range []string{"auth", "user_auth"} {
-		http.SetCookie(w, &http.Cookie{Name: name, Value: val, Path: "/", MaxAge: 30 * 24 * 3600})
+		http.SetCookie(w, &http.Cookie{Name: name, Value: val, Path: "/", MaxAge: 30 * 24 * 3600, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	}
 }
 
@@ -317,7 +362,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
 	for _, name := range []string{"auth", "user_auth"} {
-		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	}
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
@@ -577,6 +622,10 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 	sqlQ := `SELECT title, poster, year, region, genre, type, douban_id, rating, synopsis, hits_week FROM catalog WHERE 1=1`
 	// 体育已下线（2026-11-06）：目录接口不再返回体育类条目
 	sqlQ += ` AND COALESCE(kind,'') != '体育'`
+	// 未通过 4 位 PIN 解锁时，全局屏蔽 restricted=1 及“其他”分类条目
+	if !isRestrictedUnlocked(r) {
+		sqlQ += ` AND COALESCE(restricted,0) = 0 AND COALESCE(kind,'') != '其他'`
+	}
 	args := []any{}
 	// 网页粗分类（电影片/连续剧/国产剧/综艺片/动漫片/短剧）按 kind 匹配，
 	// 其余值（动作片/喜剧片等体裁）仍按 type 精确匹配；两者互不干扰
@@ -673,7 +722,11 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 			typeFilter = typ
 		}
 	}
-	regionQ := `SELECT region, COUNT(*) c FROM catalog WHERE region!='' AND COALESCE(kind,'') != '体育'`
+	restFilter := ""
+	if !isRestrictedUnlocked(r) {
+		restFilter = ` AND COALESCE(restricted,0) = 0 AND COALESCE(kind,'') != '其他'`
+	}
+	regionQ := `SELECT region, COUNT(*) c FROM catalog WHERE region!='' AND COALESCE(kind,'') != '体育'` + restFilter
 	regionArgs := []any{}
 	if kindFilter != "" {
 		regionQ += ` AND kind=?`
@@ -713,7 +766,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	genreCount := map[string]int{}
-	genreQ := `SELECT genre FROM catalog WHERE genre!='' AND COALESCE(kind,'') != '体育'`
+	genreQ := `SELECT genre FROM catalog WHERE genre!='' AND COALESCE(kind,'') != '体育'` + restFilter
 	genreArgs := []any{}
 	if kindFilter != "" {
 		genreQ += ` AND kind=?`
@@ -763,7 +816,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	// 各 kind 计数（货架浏览页分类卡用；体育不计入；与 ?type= 无关，恒为全局数）。
 	kindCounts := []map[string]any{}
-	if rows, err := db.Query(`SELECT kind, COUNT(*) c FROM catalog WHERE COALESCE(kind,'') != '体育' AND kind != '' GROUP BY kind ORDER BY c DESC`); err == nil {
+	if rows, err := db.Query(`SELECT kind, COUNT(*) c FROM catalog WHERE COALESCE(kind,'') != '体育' AND kind != ''` + restFilter + ` GROUP BY kind ORDER BY c DESC`); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var k string
@@ -775,7 +828,7 @@ func handleCatalogMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// 年份列表（货架筛选年份 pill 用；跟 ?type= 走，与地区/类型同一口径）。
-	yearQ := `SELECT year FROM catalog WHERE year != '' AND COALESCE(kind,'') != '体育' AND year GLOB '[0-9][0-9][0-9][0-9]' AND CAST(year AS INTEGER) BETWEEN 1900 AND 2030`
+	yearQ := `SELECT year FROM catalog WHERE year != '' AND COALESCE(kind,'') != '体育' AND year GLOB '[0-9][0-9][0-9][0-9]' AND CAST(year AS INTEGER) BETWEEN 1900 AND 2030` + restFilter
 	yearArgs := []any{}
 	if kindFilter != "" {
 		yearQ += ` AND kind=?`

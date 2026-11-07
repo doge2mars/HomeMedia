@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -146,11 +147,15 @@ func searchSource(s Source, q string) ([]SearchItem, error) {
 	recordSearchOutcome(s.Key, nil, time.Since(start).Milliseconds())
 	var out []SearchItem
 	for _, m := range parseVodList(d) {
+		typ, genre := sField(m, "type_name"), sField(m, "vod_class")
+		if isSportsKind(typ, genre) || isAdultContent(typ, genre) {
+			continue
+		}
 		id := sField(m, "vod_id", "id")
 		eps := parsePlayURLs(sField(m, "vod_play_url"))
 		out = append(out, SearchItem{
 			ID: id, Title: sField(m, "vod_name", "title"), Poster: sField(m, "vod_pic", "pic"),
-			Year: sField(m, "vod_year", "year"), TypeName: sField(m, "type_name"),
+			Year: sField(m, "vod_year", "year"), TypeName: typ,
 			Source: s.Key, SourceName: s.Name, Episodes: eps,
 		})
 	}
@@ -168,9 +173,14 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	// 记录搜索历史（网页端 + 电视端共用）
 	db.Exec(`INSERT OR REPLACE INTO searchhistory(username, keyword, updated_at) VALUES(?,?,?)`, currentUser(r), q, time.Now().UnixMilli())
+	unlocked := isRestrictedUnlocked(r)
+	cacheKey := "search:" + q
+	if unlocked {
+		cacheKey = "search:unlocked:" + q
+	}
 	// 服务端搜索缓存 10 分钟：同一词不再实时拉各源，换设备也命中；?fresh=1 强制刷新
 	if r.URL.Query().Get("fresh") != "1" {
-		if v, ok := cacheGet("search:" + q); ok {
+		if v, ok := cacheGet(cacheKey); ok {
 			w.Header().Set("X-Cache", "hit")
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(v))
@@ -197,14 +207,19 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	swg.Wait()
 	var all []SearchItem
 	for _, items := range perSrc {
-		all = append(all, items...)
+		for _, it := range items {
+			if !unlocked && isRestrictedContent(it.TypeName, "", kindOf(it.TypeName, "")) {
+				continue
+			}
+			all = append(all, it)
+		}
 		if len(all) > 100 {
 			all = all[:100]
 			break
 		}
 	}
 	data, _ := json.Marshal(map[string]any{"results": all, "count": len(all)})
-	cacheSet("search:"+q, string(data), 10*time.Minute)
+	cacheSet(cacheKey, string(data), 10*time.Minute)
 	w.Header().Set("X-Cache", "miss")
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(data)
@@ -389,6 +404,33 @@ func parseHits(s string) int {
 	return 0
 }
 
+func sanitizeYear(y string) string {
+	y = strings.TrimSpace(y)
+	if len(y) == 4 {
+		if n, err := strconv.Atoi(y); err == nil && n >= 1900 && n <= 2099 {
+			return y
+		}
+	}
+	if m := doubanYearRe.FindStringSubmatch(y); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n >= 1900 && n <= 2099 {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+func sanitizeRating(r string) string {
+	r = strings.TrimSpace(r)
+	if r == "" {
+		return ""
+	}
+	f, err := strconv.ParseFloat(r, 64)
+	if err != nil || f < 0 || f > 10 {
+		return ""
+	}
+	return r
+}
+
 // upsertCatalogSQL：目录入库。冲突时只刷新 hits_week（取新旧最大值，
 // 防不带点击量字段的源把值清零），其余字段与 updated_at 保持原样。
 const upsertCatalogSQL = `INSERT INTO catalog(title, poster, year, region, genre, type, douban_id, rating, synopsis, updated_at, kind, hits_week) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
@@ -426,6 +468,8 @@ func isAdultContent(typ, genre string) bool {
 	return false
 }
 
+var seriesTitleRe = regexp.MustCompile(`第[一二三四五六七八九十百0-9]+[季集]|全[0-9]+集`)
+
 func kindOf(typ, genre string) string {
 	s := typ + " " + genre
 	has := func(subs ...string) bool {
@@ -437,41 +481,86 @@ func kindOf(typ, genre string) string {
 		return false
 	}
 	switch {
-	case has("短剧"):
+	case has("短剧", "爽剧", "爽文"):
 		return "短剧"
 	case has("动漫", "动画", "漫剧"):
 		return "动漫"
-	case has("综艺", "演唱会"):
+	case has("综艺", "演唱会", "晚会"):
 		return "综艺"
 	case isSportsKind(typ, genre):
 		return "体育"
+	// 竖屏微短剧专属题材标签（源站常直接拿这些当 type_name，或 genre 里带 "短-古装仙侠" 等）：
+	// 必须在“剧”之前拦截，否则 4300+ 部高点击量微短剧会把正经剧集彻底淹没。
+	case has("现代都市", "古装仙侠", "言情总裁", "穿越年代", "脑洞悬疑", "闪婚离婚", "都市脑洞", "现代言情", "女恋总裁", "穿越现代", "女频恋爱", "成长逆袭", "年代穿越", "悬疑烧脑", "重生民国", "短-", "霸总", "女频", "男频"):
+		return "短剧"
 	// 电影片必须先于“剧”判断：喜剧片/剧情片/爱情片的 genre 里常带“剧情/喜剧”，
-	// 旧版先判“剧”子串会把几千部电影错归为剧集；片一律以 type 为准（片尾/电影字样）。
-	case strings.HasSuffix(typ, "片") || strings.Contains(typ, "电影") || typ == "伦理" || typ == "理论":
+	// 且部分源把家庭电影分类取名为“家庭篇”（篇幅的篇），也归入电影。
+	case strings.HasSuffix(typ, "片") || strings.Contains(typ, "电影") || typ == "家庭篇" || typ == "伦理" || typ == "理论" || typ == "影视解说":
 		return "电影"
 	// 剧集只看 type 里的“剧”（电视剧/连续剧/国产剧/港台剧/日韩剧/欧美剧…），
 	// 不再看 genre——genre 里的“剧情/喜剧”是电影体裁，不是剧集。
 	case typ == "剧集" || strings.Contains(typ, "剧"):
-		return "剧集"
-	case has("现代都市", "古装仙侠", "言情总裁", "穿越年代", "脑洞悬疑", "家庭篇", "闪婚离婚", "都市脑洞", "现代言情", "女恋总裁", "穿越现代", "女频恋爱", "反转爽文", "成长逆袭", "年代穿越", "悬疑烧脑"):
 		return "剧集"
 	default:
 		return "其他"
 	}
 }
 
-// backfillCatalogKinds：用当前 kindOf 重算全库 kind，修正历史错归类（如喜剧片/剧情片
-// 曾被“剧”子串误判为剧集）。只更新不一致的行，幂等，启动时跑一次。
+// refineTypeWithPlayMeta：同步拉取 ?ac=videolist 时结合 vod_remarks / vod_state 与 vod_play_url 集数做二次校验，
+// 纠正源站自身把单集电影塞进剧集分类、或把多集连续剧塞进电影分类的问题。
+func refineTypeWithPlayMeta(title, typ, genre, remarks, playURL string) string {
+	k := kindOf(typ, genre)
+	if k != "剧集" && k != "电影" {
+		return typ
+	}
+	eps := parsePlayURLs(playURL)
+	firstLabel := ""
+	if playURL != "" {
+		g0 := strings.Split(playURL, "$$$")[0]
+		p0 := strings.Split(g0, "#")[0]
+		if seg := strings.Split(p0, "$"); len(seg) >= 2 {
+			firstLabel = seg[0]
+		}
+	}
+	metaUpper := strings.ToUpper(remarks + " " + firstLabel)
+	hasSeriesMarker := seriesTitleRe.MatchString(title) ||
+		strings.Contains(metaUpper, "集") ||
+		strings.Contains(metaUpper, "季") ||
+		strings.Contains(metaUpper, "期") ||
+		strings.Contains(metaUpper, "更") ||
+		strings.Contains(metaUpper, "完结") ||
+		strings.Contains(metaUpper, "连载")
+
+	if k == "剧集" && len(eps) == 1 && !hasSeriesMarker {
+		for _, m := range []string{"HD", "正片", "BD", "TC", "TS", "1080", "720", "4K", "超清", "蓝光", "中字", "国语", "粤语", "抢先"} {
+			if strings.Contains(metaUpper, m) {
+				return "剧情片"
+			}
+		}
+	}
+	if k == "电影" && typ != "预告片" && typ != "短片" && typ != "电影解说" && typ != "影视解说" {
+		if seriesTitleRe.MatchString(title) || (len(eps) >= 3 && hasSeriesMarker) {
+			return "连续剧"
+		}
+	}
+	return typ
+}
+
+// backfillCatalogKinds：用当前 kindOf + isRestrictedContent 重算全库 kind 与 restricted，
+// 修正历史错归类（如家庭篇电影、4300+部微短剧误入剧集，以及归入“电影”的福利片未标受限）。只更新不一致的行，幂等，启动时跑一次。
 func backfillCatalogKinds() int {
-	rows, err := db.Query(`SELECT title, year, type, genre, COALESCE(kind,'') FROM catalog`)
+	rows, err := db.Query(`SELECT title, year, type, genre, COALESCE(kind,''), COALESCE(restricted,0) FROM catalog`)
 	if err != nil {
 		return 0
 	}
-	type row struct{ title, year, typ, genre, kind string }
+	type row struct {
+		title, year, typ, genre, kind string
+		restricted                    int
+	}
 	var todo []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.title, &r.year, &r.typ, &r.genre, &r.kind); err == nil {
+		if err := rows.Scan(&r.title, &r.year, &r.typ, &r.genre, &r.kind, &r.restricted); err == nil {
 			todo = append(todo, r)
 		}
 	}
@@ -482,8 +571,16 @@ func backfillCatalogKinds() int {
 	}
 	n := 0
 	for _, r := range todo {
-		if nk := kindOf(r.typ, r.genre); nk != r.kind {
-			if _, err := tx.Exec(`UPDATE catalog SET kind=? WHERE title=? AND year=? AND type=?`, nk, r.title, r.year, r.typ); err == nil {
+		nk := kindOf(r.typ, r.genre)
+		if nk == "电影" && r.typ != "预告片" && r.typ != "短片" && r.typ != "电影解说" && r.typ != "影视解说" && seriesTitleRe.MatchString(r.title) {
+			nk = "剧集"
+		}
+		nr := 0
+		if isRestrictedContent(r.typ, r.genre, nk) {
+			nr = 1
+		}
+		if nk != r.kind || nr != r.restricted {
+			if _, err := tx.Exec(`UPDATE catalog SET kind=?, restricted=? WHERE title=? AND year=? AND type=?`, nk, nr, r.title, r.year, r.typ); err == nil {
 				n++
 			}
 		}
@@ -532,12 +629,19 @@ func syncCatalogWith(cfg syncConfig) error {
 			if err != nil {
 				return
 			}
+			consecutiveCatFails := 0
 			for _, c := range cats {
 				var catItems []catalogItem
 				for pg := 1; pg <= pages; pg++ {
 					d, err := cmsGet(s.API, "ac=videolist&t="+url.QueryEscape(c.ID)+"&pg="+strconv.Itoa(pg))
 					if err != nil {
+						if pg == 1 {
+							consecutiveCatFails++
+						}
 						break
+					}
+					if pg == 1 {
+						consecutiveCatFails = 0
 					}
 					for _, m := range parseVodList(d) {
 						title := sField(m, "vod_name", "title")
@@ -548,29 +652,54 @@ func syncCatalogWith(cfg syncConfig) error {
 						if typ == "" {
 							typ = c.Name
 						}
-						catItems = append(catItems, catalogItem{title, sField(m, "vod_pic", "pic"), sField(m, "vod_year", "year"), sField(m, "vod_area"), sField(m, "vod_class"), typ, sField(m, "vod_score"), sField(m, "vod_blurb", "vod_content"), parseHits(sField(m, "vod_hits_week", "vod_hits_day", "vod_hits"))})
+						genre := sField(m, "vod_class")
+						typ = refineTypeWithPlayMeta(title, typ, genre, sField(m, "vod_remarks", "vod_state"), sField(m, "vod_play_url"))
+						catItems = append(catItems, catalogItem{
+							title,
+							sField(m, "vod_pic", "pic"),
+							sanitizeYear(sField(m, "vod_year", "year")),
+							sField(m, "vod_area"),
+							genre,
+							typ,
+							sanitizeRating(sField(m, "vod_score")),
+							sField(m, "vod_blurb", "vod_content"),
+							parseHits(sField(m, "vod_hits_week", "vod_hits_day", "vod_hits")),
+						})
 					}
 				}
-				// 每类写完立刻落库（写库串行加锁）：长同步中途也能看到库在涨，中断也不白跑
+				if consecutiveCatFails >= 3 {
+					log.Printf("sync: source %s (%s) failed 3 categories in a row, aborting source early", s.Key, s.Name)
+					break
+				}
+				if len(catItems) == 0 {
+					continue
+				}
+				// 每类写完以单事务批量落库（写库串行加锁）：大幅降低 SQLite 锁竞争与 fsync 次数
 				mu.Lock()
-				for _, it := range catItems {
-					if isSportsKind(it.typ, it.genre) {
-						continue // 体育已下线：不同步入库
+				tx, txErr := db.Begin()
+				if txErr == nil {
+					for _, it := range catItems {
+						if isSportsKind(it.typ, it.genre) {
+							continue // 体育已下线：不同步入库
+						}
+						if isAdultContent(it.typ, it.genre) {
+							continue // 成人内容不入库（2026-11-06 清理）
+						}
+						k := kindOf(it.typ, it.genre)
+						_, _ = tx.Exec(upsertCatalogSQL,
+							it.title, it.poster, it.year, it.region, it.genre, it.typ, "", it.rating, it.synopsis, now, k, it.hitsWeek)
+						if isRestrictedContent(it.typ, it.genre, k) {
+							_, _ = tx.Exec(`UPDATE catalog SET restricted=1 WHERE title=? AND year=? AND type=?`, it.title, it.year, it.typ)
+						}
 					}
-					if isAdultContent(it.typ, it.genre) {
-						continue // 成人内容不入库（2026-11-06 清理）
-					}
-					// #13 同步顺带回填 hits_week：已入库的旧行只更新点击量，updated_at 不动（不打乱“最新入库”排序）。
-					// 取 MAX 而不是直接覆盖：同一标题多源都有，不带点击量字段的源会报 0，
-					// 直接覆盖会把别的源已填的值清零（实测 2026-11-06 回填中 7166→7155）。
-					_, _ = db.Exec(upsertCatalogSQL,
-						it.title, it.poster, it.year, it.region, it.genre, it.typ, "", it.rating, it.synopsis, now, kindOf(it.typ, it.genre), it.hitsWeek)
+					_ = tx.Commit()
 				}
 				mu.Unlock()
 			}
 		}()
 	}
 	wg.Wait()
+	backfillCatalogKinds()
 	db.Exec(`INSERT OR REPLACE INTO meta(k, v) VALUES('last_catalog_sync', ?)`, strconv.FormatInt(now, 10))
 	metaInvalidate("last_catalog_sync")
 	// 同步完立即后台预取海报，货架第一次打开就不用等源站 CDN
@@ -755,10 +884,30 @@ func extractShareM3U8(html, pageURL string) string {
 	return u.String()
 }
 
+func validateProxyURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("bad url")
+	}
+	host := u.Hostname()
+	if host != "127.0.0.1" && host != "localhost" && isPrivateHost(host) {
+		return nil, fmt.Errorf("private host blocked")
+	}
+	return u, nil
+}
+
 func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
 		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	if _, err := validateProxyURL(raw); err != nil {
+		if strings.Contains(err.Error(), "private") {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+		} else {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	// VOD 播放列表（含 #EXT-X-ENDLIST）缓存 5 分钟；直播不缓存，永远实时取
@@ -983,6 +1132,14 @@ func handleProxySegment(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
 		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	if _, err := validateProxyURL(raw); err != nil {
+		if strings.Contains(err.Error(), "private") {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+		} else {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	cachePath := segmentCachePath(raw)

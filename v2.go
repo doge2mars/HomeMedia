@@ -61,6 +61,10 @@ func handleSourcesV2(w http.ResponseWriter, r *http.Request) {
 			dis = 1
 		}
 		db.Exec(`INSERT OR REPLACE INTO sources(key, name, api, disabled) VALUES(?,?,?,?)`, b.Key, b.Name, b.API, dis)
+		removeHealthDisabled(b.Key)
+		if !b.Disabled {
+			recordSearchOutcome(b.Key, nil, 0)
+		}
 		writeJSON(w, 200, map[string]string{"ok": "true"})
 	case http.MethodDelete:
 		k := r.URL.Query().Get("key")
@@ -69,6 +73,7 @@ func handleSourcesV2(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		db.Exec(`DELETE FROM sources WHERE key=?`, k)
+		removeHealthDisabled(k)
 		writeJSON(w, 200, map[string]string{"ok": "true"})
 	default:
 		writeJSON(w, 405, map[string]string{"error": "method"})

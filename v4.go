@@ -100,9 +100,13 @@ func searchSourceCtxDirect(ctx context.Context, s Source, q string) ([]SearchIte
 	recordSearchOutcome(s.Key, nil, time.Since(start).Milliseconds())
 	var out []SearchItem
 	for _, m := range parseVodList(d) {
+		typ, genre := sField(m, "type_name"), sField(m, "vod_class")
+		if isSportsKind(typ, genre) || isAdultContent(typ, genre) {
+			continue
+		}
 		out = append(out, SearchItem{
 			ID: sField(m, "vod_id", "id"), Title: sField(m, "vod_name", "title"), Poster: sField(m, "vod_pic", "pic"),
-			Year: sField(m, "vod_year", "year"), TypeName: sField(m, "type_name"),
+			Year: sField(m, "vod_year", "year"), TypeName: typ,
 			Source: s.Key, SourceName: s.Name, Episodes: parsePlayURLs(sField(m, "vod_play_url")),
 		})
 	}
@@ -129,8 +133,52 @@ func cmsGetCtx(ctx context.Context, api, query string) (map[string]any, error) {
 	return d, nil
 }
 
+type aggCacheEntry struct {
+	sources    []aggSource
+	totalCount int
+	exp        time.Time
+}
+
+var (
+	aggCacheMu        sync.Mutex
+	aggCache          = map[string]aggCacheEntry{}
+	aggCacheTTL       = 3 * time.Minute
+	activeAggStreamMu sync.Mutex
+	activeAggStreams  = map[string]context.CancelFunc{}
+)
+
+func resetAggCache() {
+	aggCacheMu.Lock()
+	aggCache = map[string]aggCacheEntry{}
+	aggCacheMu.Unlock()
+}
+
+func aggCacheGet(want string) ([]aggSource, int, bool) {
+	aggCacheMu.Lock()
+	defer aggCacheMu.Unlock()
+	e, ok := aggCache[want]
+	if !ok {
+		return nil, 0, false
+	}
+	if time.Now().After(e.exp) {
+		delete(aggCache, want)
+		return nil, 0, false
+	}
+	out := make([]aggSource, len(e.sources))
+	copy(out, e.sources)
+	return out, e.totalCount, true
+}
+
+func aggCacheSet(want string, sources []aggSource, totalCount int) {
+	cp := make([]aggSource, len(sources))
+	copy(cp, sources)
+	aggCacheMu.Lock()
+	aggCache[want] = aggCacheEntry{sources: cp, totalCount: totalCount, exp: time.Now().Add(aggCacheTTL)}
+	aggCacheMu.Unlock()
+}
+
 // ---- 流式聚合详情：GET /api/detail-aggregate-stream?title=... ----
-// 事件：start{total} / source{source} / speed{source, speed_kbs, resolution} / complete{total} / error{source, error}
+// 事件：start{total} / source{source} / speed{source, speed_kbs, resolution, latency_ms, score} / complete{total} / error{source, error}
 func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 	// 防崩：SSE 断开后后台 goroutine 再写已回收的 ResponseWriter 会 panic，
 	// 2026-11-04 实测一次客户端断开直接拖垮整个服务进程；此处兜底，单个流死不拖全站
@@ -147,8 +195,23 @@ func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": "no flusher"})
 		return
 	}
-	ctx := r.Context()
-	srcs := listSources()
+	// 单用户流驱逐：同一账号切新详情或重连时，主动取消上一条未结束的旧聚合流，防并发流翻倍烧源站
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	if u := currentUser(r); u != "" {
+		activeAggStreamMu.Lock()
+		if oldCancel, exists := activeAggStreams[u]; exists {
+			oldCancel()
+		}
+		activeAggStreams[u] = cancel
+		activeAggStreamMu.Unlock()
+		defer func() {
+			activeAggStreamMu.Lock()
+			delete(activeAggStreams, u)
+			activeAggStreamMu.Unlock()
+		}()
+	}
+
 	emit := func(v any) (ok bool) {
 		// 断开后不再写；Flush 已回收的 Writer 会 panic，用 recover 转成 false
 		defer func() {
@@ -166,14 +229,50 @@ func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 		fl.Flush()
 		return true
 	}
+
+	want := stripVersionSuffix(title)
+	// 3 分钟聚合结果短缓存：客户端自动重连或从详情点“直接播放”二进宫时直接秒推，不再把 29 个源重查一遍
+	if r.URL.Query().Get("fresh") != "1" {
+		if cachedSrcs, totalCnt, hit := aggCacheGet(want); hit {
+			if !emit(map[string]any{"type": "start", "totalSources": totalCnt, "title": title, "cached": true}) {
+				return
+			}
+			for _, sd := range cachedSrcs {
+				sdCopy := sd
+				if !emit(map[string]any{"type": "source", "source": &sdCopy}) {
+					return
+				}
+				if sp, res, lat, err := speedTestSource(ctx, sdCopy.Episodes); err == nil {
+					if !emit(map[string]any{"type": "speed", "source": sdCopy.Source, "id": sdCopy.ID, "speed_kbs": sp, "resolution": res, "latency_ms": lat, "score": scoreProbe(res, sp, lat)}) {
+						return
+					}
+				}
+			}
+			emit(map[string]any{"type": "complete", "total": len(cachedSrcs)})
+			return
+		}
+	}
+
+	srcs := listSources()
 	if !emit(map[string]any{"type": "start", "totalSources": len(srcs), "title": title}) {
 		return
 	}
-	want := stripVersionSuffix(title)
-	sem := make(chan struct{}, 5)
+	// 搜索与测速信号量拆离：searchSem（并发 6）搜完元数据立即释放，绝不被分片测速霸占槽位；
+	// speedSem（并发 4）独立限制并发分片下载；单写 channel evCh 让主协程独占写 SSE，消除持锁 Flush 阻塞。
+	searchSem := make(chan struct{}, 6)
+	speedSem := make(chan struct{}, 4)
+	evCh := make(chan map[string]any, 64)
+	sendEv := func(ev map[string]any) bool {
+		select {
+		case evCh <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	found := 0
+	var collectMu sync.Mutex
+	var collected []aggSource
 	for _, s := range srcs {
 		s := s
 		wg.Add(1)
@@ -181,138 +280,87 @@ func handleDetailAggregateStream(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			defer func() { _ = recover() }()
 			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
+			case searchSem <- struct{}{}:
 			case <-ctx.Done():
 				return
 			}
 			sd := aggregateOneSource(ctx, s, title, want)
+			<-searchSem // 搜完立刻释放搜索槽位，不等测速
 			if sd == nil || len(sd.Episodes) == 0 {
 				return
 			}
-			mu.Lock()
-			found++
-			ok := emit(map[string]any{"type": "source", "source": sd})
-			mu.Unlock()
-			if !ok {
+			collectMu.Lock()
+			collected = append(collected, *sd)
+			collectMu.Unlock()
+			if !sendEv(map[string]any{"type": "source", "source": sd}) {
 				return
 			}
-			// 测速与详情并行后发：先让用户播，不等测速
+			// 测速进入独立信号量（若已命中 probeCache 则不占槽秒回）
+			if len(sd.Episodes) > 0 {
+				if m, ok := probeCacheGet(sd.Episodes[0]); ok {
+					if m.OK {
+						sendEv(map[string]any{"type": "speed", "source": sd.Source, "id": sd.ID, "speed_kbs": m.SpeedKBs, "resolution": m.Resolution, "latency_ms": m.LatencyMs, "score": m.Score})
+					}
+					return
+				}
+			}
+			select {
+			case speedSem <- struct{}{}:
+				defer func() { <-speedSem }()
+			case <-ctx.Done():
+				return
+			}
 			if sp, res, lat, err := speedTestSource(ctx, sd.Episodes); err == nil {
-				mu.Lock()
-				emit(map[string]any{"type": "speed", "source": sd.Source, "id": sd.ID, "speed_kbs": sp, "resolution": res, "latency_ms": lat, "score": scoreProbe(res, sp, lat)})
-				mu.Unlock()
+				sendEv(map[string]any{"type": "speed", "source": sd.Source, "id": sd.ID, "speed_kbs": sp, "resolution": res, "latency_ms": lat, "score": scoreProbe(res, sp, lat)})
 			}
 		}()
 	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
+	go func() {
+		wg.Wait()
+		close(evCh)
+	}()
+	found := 0
+	for ev := range evCh {
+		if ev["type"] == "source" {
+			found++
+		}
+		if !emit(ev) {
+			cancel()
+			return
+		}
+	}
+	if ctx.Err() == nil {
+		if len(collected) > 0 {
+			aggCacheSet(want, collected, len(srcs))
+		}
 		emit(map[string]any{"type": "complete", "total": found})
-	case <-ctx.Done():
-		// 客户端断开（用户点了另一个视频）：直接停，后台 goroutine 随 ctx 取消，不积压
-		return
 	}
 }
 
-// 测速：取一集 m3u8（优先第 2 集，更具代表性，同款思路），
-// 解析 master 播放列表的最高分辨率，下载首个分片一部分算速度；8 秒超时，失败不淘汰该源。
-// 返回：速度 KB/s、最高分辨率、首包延迟 ms（第一次取播放列表的 TTFB，供加权评分用）。
+// 测速：复用 probePlayURL + probeCache（取第 1 集，与优选播放候选 URL 完全对齐），
+// 自动具备 HTTP 200 校验、HTML 分享页真链提取、防盗链错误页拦截与完整首分片落盘缓存。
 func speedTestSource(ctx context.Context, episodes []string) (float64, string, int64, error) {
 	if len(episodes) == 0 {
 		return 0, "", 0, fmt.Errorf("no episodes")
 	}
-	idx := 0
-	if len(episodes) > 1 {
-		idx = 1
+	raw := episodes[0]
+	if m, ok := probeCacheGet(raw); ok {
+		if !m.OK {
+			return 0, "", m.LatencyMs, fmt.Errorf("%s", m.Error)
+		}
+		return m.SpeedKBs, m.Resolution, m.LatencyMs, nil
 	}
-	raw := episodes[idx]
-	ctx2, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	fetchStart := time.Now()
-	req, _ := http.NewRequestWithContext(ctx2, "GET", raw, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
-	resp, err := httpClient.Do(req)
+	sp, res, lat, err := probePlayURL(ctx, raw)
+	m := probeMetrics{SpeedKBs: sp, Resolution: res, LatencyMs: lat}
 	if err != nil {
-		return 0, "", 0, err
+		m.Error = err.Error()
+		probeCacheSet(raw, m)
+		return 0, res, lat, err
 	}
-	latencyMs := time.Since(fetchStart).Milliseconds()
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return 0, "", latencyMs, err
-	}
-	text := string(body)
-	res := ""
-	if strings.Contains(text, "#EXT-X-STREAM-INF") {
-		// master 播放列表：取最大的 RESOLUTION
-		re := regexp.MustCompile(`RESOLUTION=(\d+x\d+)`)
-		for _, m := range re.FindAllStringSubmatch(text, -1) {
-			if m[1] > res {
-				res = m[1]
-			}
-		}
-		// 取第一个变体地址继续测分片
-		lines := strings.Split(text, "\n")
-		for i, l := range lines {
-			if strings.HasPrefix(strings.TrimSpace(l), "#EXT-X-STREAM-INF") && i+1 < len(lines) {
-				u := strings.TrimSpace(lines[i+1])
-				if u != "" && !strings.HasPrefix(u, "#") {
-					if !strings.HasPrefix(u, "http") {
-						if b, err := url.Parse(raw); err == nil {
-							if uu, err := b.Parse(u); err == nil {
-								u = uu.String()
-							}
-						}
-					}
-					raw = u
-					break
-				}
-			}
-		}
-		// 变体 m3u8 再取一次
-		req2, _ := http.NewRequestWithContext(ctx2, "GET", raw, nil)
-		req2.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
-		if resp2, err := httpClient.Do(req2); err == nil {
-			defer resp2.Body.Close()
-			b2, _ := io.ReadAll(io.LimitReader(resp2.Body, 2<<20))
-			text = string(b2)
-		}
-	}
-	// 首个分片地址
-	segURL := ""
-	for _, l := range strings.Split(text, "\n") {
-		t := strings.TrimSpace(l)
-		if t != "" && !strings.HasPrefix(t, "#") {
-			segURL = t
-			break
-		}
-	}
-	if segURL == "" {
-		return 0, res, latencyMs, fmt.Errorf("no segment")
-	}
-	if !strings.HasPrefix(segURL, "http") {
-		if b, err := url.Parse(raw); err == nil {
-			if uu, err := b.Parse(segURL); err == nil {
-				segURL = uu.String()
-			}
-		}
-	}
-	start := time.Now()
-	req3, _ := http.NewRequestWithContext(ctx2, "GET", segURL, nil)
-	req3.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
-	resp3, err := httpClient.Do(req3)
-	if err != nil {
-		return 0, res, latencyMs, err
-	}
-	defer resp3.Body.Close()
-	n, _ := io.Copy(io.Discard, io.LimitReader(resp3.Body, 512<<10))
-	elapsed := time.Since(start).Seconds()
-	if elapsed <= 0 {
-		elapsed = 0.001
-	}
-	return float64(n) / 1024 / elapsed, res, latencyMs, nil
+	m.OK = true
+	m.Score = scoreProbe(res, sp, lat)
+	probeCacheSet(raw, m)
+	return sp, res, lat, nil
 }
 
 // ---- 一键测全部源（探针逻辑见 health.go testSourceOnce） ----
@@ -363,6 +411,7 @@ func handleSourcesDisableFailed(w http.ResponseWriter, r *http.Request) {
 	n := 0
 	for _, k := range b.Keys {
 		if _, err := db.Exec(`UPDATE sources SET disabled=1 WHERE key=?`, k); err == nil {
+			addHealthDisabled(k)
 			n++
 		}
 	}
@@ -411,3 +460,5 @@ func dedupeOnSubscribe(s subSource) (string, bool) {
 
 var _ = sort.StringSlice{}
 var _ = strconv.Itoa
+var _ = io.Discard
+var _ = regexp.MustCompile
