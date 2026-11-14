@@ -146,6 +146,7 @@ func main() {
 	mux.HandleFunc("/api/play/best", auth(handlePlayBest))
 	mux.HandleFunc("/api/proxy/m3u8", handleProxyM3U8)
 	mux.HandleFunc("/api/proxy/segment", handleProxySegment)
+	mux.HandleFunc("/api/proxy/stream", handleProxyStream)
 	mux.HandleFunc("/api/image-proxy", handleImageProxy)
 	mux.HandleFunc("/api/upcoming", auth(handleUpcoming))
 	mux.HandleFunc("/api/upcoming-config", auth(handleUpcomingConfig))

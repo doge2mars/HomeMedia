@@ -827,6 +827,14 @@ func filterAdsFromM3U8(content string) string {
 }
 
 func rewriteM3U8(content, base string) string {
+	return rewriteM3U8WithMode(content, base, false)
+}
+
+func rewriteM3U8WithMode(content, base string, isLive bool) string {
+	m3u8Prefix := "/api/proxy/m3u8?url="
+	if isLive {
+		m3u8Prefix = "/api/proxy/m3u8?live=1&url="
+	}
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		trim := strings.TrimSpace(line)
@@ -847,8 +855,8 @@ func rewriteM3U8(content, base string) string {
 					}
 					if absURI != "" {
 						proxy := "/api/proxy/segment?url=" + url.QueryEscape(absURI)
-						if strings.HasSuffix(absURI, ".m3u8") {
-							proxy = "/api/proxy/m3u8?url=" + url.QueryEscape(absURI)
+						if strings.HasSuffix(strings.Split(absURI, "?")[0], ".m3u8") {
+							proxy = m3u8Prefix + url.QueryEscape(absURI)
 						}
 						lines[i] = strings.Replace(line, `URI="`+rawURI+`"`, `URI="`+proxy+`"`, 1)
 					}
@@ -872,8 +880,8 @@ func rewriteM3U8(content, base string) string {
 		if abs == "" {
 			continue
 		}
-		if strings.HasSuffix(abs, ".m3u8") {
-			lines[i] = "/api/proxy/m3u8?url=" + url.QueryEscape(abs)
+		if strings.HasSuffix(strings.Split(abs, "?")[0], ".m3u8") {
+			lines[i] = m3u8Prefix + url.QueryEscape(abs)
 		} else {
 			lines[i] = "/api/proxy/segment?url=" + url.QueryEscape(abs)
 		}
@@ -952,8 +960,12 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 502, map[string]string{"error": fmt.Sprintf("upstream status %d", resp.StatusCode)})
 		return
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	ct := resp.Header.Get("Content-Type")
+	if isLive && (strings.HasPrefix(ct, "video/") || strings.Contains(ct, "octet-stream")) && !strings.Contains(ct, "mpegurl") {
+		writeJSON(w, 415, map[string]string{"error": "not m3u8 stream"})
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	// 分享页解析：上游返回 HTML 落地页时，从中取出真 m3u8 再拉一次；
 	// 取不到真链、或重拉仍是 HTML 时直接 502（HTML 透传给播放器只会让它空耗到退出）。
 	if strings.Contains(ct, "text/html") {
@@ -982,8 +994,12 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 		}
 		raw = real
 	}
-	if strings.Contains(ct, "mpegurl") || strings.Contains(raw, ".m3u8") {
-		out := rewriteM3U8(filterAdsFromM3U8(string(body)), raw)
+	finalURL := raw
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	if strings.Contains(ct, "mpegurl") || strings.Contains(finalURL, ".m3u8") || strings.Contains(string(body), "#EXTM3U") {
+		out := rewriteM3U8WithMode(filterAdsFromM3U8(string(body)), finalURL, isLive)
 		if !isLive && strings.Contains(out, "#EXT-X-ENDLIST") {
 			cacheSet("m3u8:"+raw, out, 5*time.Minute)
 		}
@@ -997,6 +1013,64 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write(body)
+}
+
+var liveStreamClient = &http.Client{
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: 15 * time.Second,
+	},
+}
+
+// handleProxyStream：用于 HTTP-TS / HTTP-FLV 等持续直播流透传（不缓存、不等待 EOF）
+func handleProxyStream(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("url")
+	if raw == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	if _, err := validateProxyURL(raw); err != nil {
+		if strings.Contains(err.Error(), "private") {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+		} else {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+		}
+		return
+	}
+	req, _ := http.NewRequestWithContext(r.Context(), "GET", raw, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 HomeMedia/0.1")
+	resp, err := liveStreamClient.Do(req)
+	if err != nil {
+		writeJSON(w, 502, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeJSON(w, 502, map[string]string{"error": fmt.Sprintf("upstream status %d", resp.StatusCode)})
+		return
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-store")
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if rerr != nil {
+			return
+		}
+	}
 }
 
 // 分片磁盘缓存：给低配 Chromebook 准备的——第一次从源站拿、落盘，
