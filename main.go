@@ -136,6 +136,7 @@ func main() {
 	mux.HandleFunc("/api/search/suggest", auth(handleSearchSuggest))
 	mux.HandleFunc("/api/tmdb/trending", auth(handleTMDBTrending))
 	mux.HandleFunc("/api/live/sources", auth(handleLiveSourcesV2))
+	mux.HandleFunc("/api/live/file", handleLiveFile)
 	mux.HandleFunc("/api/live/subscribe", auth(ownerOnly(handleLiveSubscribe)))
 	mux.HandleFunc("/api/live/import-file", auth(ownerOnly(handleLiveImportFile)))
 	mux.HandleFunc("/api/live/subscriptions", auth(ownerOnly(handleLiveSubscriptionsList)))
@@ -665,6 +666,10 @@ func handleSearchHistory(w http.ResponseWriter, r *http.Request) {
 func handleLiveSources(w http.ResponseWriter, r *http.Request) {
 	rows, _ := db.Query(`SELECT key, name, url, ua, epg, disabled FROM livesources ORDER BY key`)
 	defer rows.Close()
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
 	out := []map[string]any{}
 	for rows.Next() {
 		var k, n, u2, ua, epg string
@@ -672,6 +677,15 @@ func handleLiveSources(w http.ResponseWriter, r *http.Request) {
 		rows.Scan(&k, &n, &u2, &ua, &epg, &dis)
 		if dis == 1 {
 			continue
+		}
+		if strings.HasPrefix(u2, "local://") {
+			fileKey := strings.TrimPrefix(u2, "local://")
+			path := "/api/live/file?key=" + url.QueryEscape(fileKey) + "&sig=" + url.QueryEscape(sign("livefile:"+fileKey))
+			if r.Host != "" {
+				u2 = scheme + "://" + r.Host + path
+			} else {
+				u2 = path
+			}
 		}
 		out = append(out, map[string]any{"key": k, "name": n, "url": u2, "ua": ua, "epg": epg, "from": "custom"})
 	}

@@ -245,4 +245,33 @@ func TestLiveImportFile(t *testing.T) {
 	if r2["channels"] != float64(1) || r2["format"] != "tvbox-txt" {
 		t.Fatalf("unexpected txt import response: %+v", r2)
 	}
+
+	// 3) 电视端 /api/live/sources 应返回可直连的 http(s)://.../api/live/file?key=...&sig=... 地址，并可免 Cookie 拉取 M3U
+	reqSrc := httptest.NewRequest("GET", "/api/live/sources", nil)
+	reqSrc.Host = "192.168.123.240:8090"
+	recSrc := httptest.NewRecorder()
+	handleLiveSources(recSrc, reqSrc)
+	if recSrc.Code != 200 {
+		t.Fatalf("live sources status = %d", recSrc.Code)
+	}
+	var srcResp struct {
+		Data []struct {
+			Key string `json:"key"`
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recSrc.Body.Bytes(), &srcResp); err != nil || len(srcResp.Data) < 2 {
+		t.Fatalf("unexpected live sources response: %s", recSrc.Body.String())
+	}
+	for _, item := range srcResp.Data {
+		if !bytes.HasPrefix([]byte(item.URL), []byte("http://192.168.123.240:8090/api/live/file?")) {
+			t.Fatalf("expected HTTP live file URL for TV, got %s", item.URL)
+		}
+		reqFile := httptest.NewRequest("GET", item.URL, nil)
+		recFile := httptest.NewRecorder()
+		handleLiveFile(recFile, reqFile)
+		if recFile.Code != 200 || !bytes.Contains(recFile.Body.Bytes(), []byte("#EXTM3U")) {
+			t.Fatalf("handleLiveFile failed for %s: code=%d body=%s", item.Key, recFile.Code, recFile.Body.String())
+		}
+	}
 }

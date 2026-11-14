@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/hmac"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -593,6 +594,33 @@ func parseTVBoxTXT(text string) []Channel {
 func liveFilePath(key string) string {
 	safe := filepath.Base(key)
 	return filepath.Join(getenv("HOME_MEDIA_DATA", "/opt/home-media/data"), "live-files", safe+".txt")
+}
+
+func handleLiveFile(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Query().Get("key")
+	sig := r.URL.Query().Get("sig")
+	if key == "" || !hmac.Equal([]byte(sig), []byte(sign("livefile:"+key))) {
+		writeJSON(w, 403, map[string]string{"error": "invalid signature"})
+		return
+	}
+	data, err := os.ReadFile(liveFilePath(key))
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "live file not found"})
+		return
+	}
+	text := string(data)
+	if !strings.Contains(text, "#EXTINF") {
+		var sb strings.Builder
+		sb.WriteString("#EXTM3U\n")
+		for _, ch := range parseTVBoxTXT(text) {
+			grp := strings.ReplaceAll(ch.Group, `"`, "")
+			sb.WriteString(fmt.Sprintf("#EXTINF:-1 group-title=\"%s\",%s\n%s\n", grp, ch.Name, ch.URL))
+		}
+		text = sb.String()
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	_, _ = w.Write([]byte(text))
 }
 
 func handleLiveImportFile(w http.ResponseWriter, r *http.Request) {
