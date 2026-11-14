@@ -137,6 +137,7 @@ func main() {
 	mux.HandleFunc("/api/tmdb/trending", auth(handleTMDBTrending))
 	mux.HandleFunc("/api/live/sources", auth(handleLiveSourcesV2))
 	mux.HandleFunc("/api/live/subscribe", auth(ownerOnly(handleLiveSubscribe)))
+	mux.HandleFunc("/api/live/import-file", auth(ownerOnly(handleLiveImportFile)))
 	mux.HandleFunc("/api/live/subscriptions", auth(ownerOnly(handleLiveSubscriptionsList)))
 	mux.HandleFunc("/api/live/subscriptions/update", auth(ownerOnly(handleLiveSubscriptionUpdate)))
 	mux.HandleFunc("/api/live/subscriptions/delete", auth(ownerOnly(handleLiveSubscriptionDelete)))

@@ -759,7 +759,11 @@ func parseM3U(rawURL string) ([]Channel, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	sc := bufio.NewScanner(resp.Body)
+	return parseM3UReader(resp.Body)
+}
+
+func parseM3UReader(r io.Reader) ([]Channel, error) {
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
 	var out []Channel
 	var cur Channel
@@ -784,7 +788,7 @@ func parseM3U(rawURL string) ([]Channel, error) {
 			cur = Channel{}
 		}
 	}
-	return out, nil
+	return out, sc.Err()
 }
 
 // ---- 服务端 m3u8 代理 + 去广告 ----

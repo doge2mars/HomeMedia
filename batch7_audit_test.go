@@ -194,3 +194,55 @@ func TestCatalogDedupeTitleYear(t *testing.T) {
 		t.Fatalf("expected 2 deduplicated items, got %d (%+v)", len(resp.Items), resp.Items)
 	}
 }
+
+func TestLiveImportFile(t *testing.T) {
+	openTestDB(t)
+	t.Setenv("HOME_MEDIA_DATA", t.TempDir())
+
+	// 1) M3U 本地文件导入
+	m3uBody, _ := json.Marshal(map[string]string{
+		"filename": "iptv.m3u",
+		"content":  "#EXTM3U\n#EXTINF:-1 group-title=\"央视\",CCTV-1\nhttp://live.example.com/1.m3u8\n#EXTINF:-1 group-title=\"卫视\",湖南卫视\nhttp://live.example.com/2.m3u8\n",
+	})
+	req1 := httptest.NewRequest("POST", "/api/live/import-file", bytes.NewReader(m3uBody))
+	rec1 := httptest.NewRecorder()
+	handleLiveImportFile(rec1, req1)
+	if rec1.Code != 200 {
+		t.Fatalf("m3u import status = %d, body = %s", rec1.Code, rec1.Body.String())
+	}
+	var r1 map[string]any
+	_ = json.Unmarshal(rec1.Body.Bytes(), &r1)
+	if r1["channels"] != float64(2) || r1["format"] != "m3u" {
+		t.Fatalf("unexpected m3u import response: %+v", r1)
+	}
+
+	reqCh := httptest.NewRequest("GET", "/api/live/channels?source="+r1["key"].(string), nil)
+	recCh := httptest.NewRecorder()
+	handleLiveChannelsV3(recCh, reqCh)
+	if recCh.Code != 200 {
+		t.Fatalf("channels status = %d, body = %s", recCh.Code, recCh.Body.String())
+	}
+	var chResp map[string]any
+	_ = json.Unmarshal(recCh.Body.Bytes(), &chResp)
+	if chResp["total"] != float64(2) {
+		t.Fatalf("expected total=2 channels, got %+v", chResp)
+	}
+
+	// 2) TVBox TXT 本地文件导入
+	txtBody, _ := json.Marshal(map[string]string{
+		"name":     "家里TXT",
+		"filename": "tv.txt",
+		"content":  "央视,#genre#\nCCTV-5,http://live.example.com/5.m3u8\n",
+	})
+	req2 := httptest.NewRequest("POST", "/api/live/import-file", bytes.NewReader(txtBody))
+	rec2 := httptest.NewRecorder()
+	handleLiveImportFile(rec2, req2)
+	if rec2.Code != 200 {
+		t.Fatalf("txt import status = %d, body = %s", rec2.Code, rec2.Body.String())
+	}
+	var r2 map[string]any
+	_ = json.Unmarshal(rec2.Body.Bytes(), &r2)
+	if r2["channels"] != float64(1) || r2["format"] != "tvbox-txt" {
+		t.Fatalf("unexpected txt import response: %+v", r2)
+	}
+}

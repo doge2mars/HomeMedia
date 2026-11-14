@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -588,6 +590,73 @@ func parseTVBoxTXT(text string) []Channel {
 	return out
 }
 
+func liveFilePath(key string) string {
+	safe := filepath.Base(key)
+	return filepath.Join(getenv("HOME_MEDIA_DATA", "/opt/home-media/data"), "live-files", safe+".txt")
+}
+
+func handleLiveImportFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	var b struct {
+		Name     string `json:"name"`
+		Filename string `json:"filename"`
+		Content  string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "bad body"})
+		return
+	}
+	text := strings.TrimSpace(b.Content)
+	if text == "" {
+		writeJSON(w, 400, map[string]string{"error": "empty file"})
+		return
+	}
+	format := "m3u"
+	ch, _ := parseM3UReader(strings.NewReader(text))
+	if len(ch) == 0 {
+		ch = parseTVBoxTXT(text)
+		format = "tvbox-txt"
+	}
+	if len(ch) == 0 {
+		writeJSON(w, 400, map[string]string{"error": "unrecognized M3U or TVBox TXT content"})
+		return
+	}
+	dispName := strings.TrimSpace(b.Name)
+	if dispName == "" {
+		base := strings.TrimSuffix(filepath.Base(strings.TrimSpace(b.Filename)), filepath.Ext(strings.TrimSpace(b.Filename)))
+		dispName = base
+	}
+	if dispName == "" {
+		dispName = "本地直播源"
+	}
+	slug := regexp.MustCompile(`[^a-zA-Z0-9_-]+`).ReplaceAllString(dispName, "_")
+	slug = strings.Trim(slug, "_")
+	if slug == "" {
+		slug = fmt.Sprintf("local_%d", time.Now().Unix())
+	} else {
+		slug = "local_" + slug
+	}
+	p := liveFilePath(slug)
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := os.WriteFile(p, []byte(text), 0644); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if _, err := db.Exec(`INSERT OR REPLACE INTO livesources(key, name, url, ua, epg, disabled, sub_url) VALUES(?,?,?,?,?,0,'')`, slug, dispName, "local://"+slug, "", ""); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	cacheDelPrefix("livechannels:" + slug)
+	writeJSON(w, 200, map[string]any{"key": slug, "name": dispName, "channels": len(ch), "format": format})
+}
+
 func handleLiveChannelsV3(w http.ResponseWriter, r *http.Request) {
 	key := r.URL.Query().Get("source")
 	fresh := r.URL.Query().Get("fresh") == "1"
@@ -607,6 +676,20 @@ func handleLiveChannelsV3(w http.ResponseWriter, r *http.Request) {
 	var u string
 	if err := db.QueryRow(`SELECT url FROM livesources WHERE key=?`, key).Scan(&u); err != nil {
 		writeJSON(w, 404, map[string]string{"error": "live source not found"})
+		return
+	}
+	if strings.HasPrefix(u, "local://") {
+		fileKey := strings.TrimPrefix(u, "local://")
+		data, err := os.ReadFile(liveFilePath(fileKey))
+		if err != nil {
+			writeJSON(w, 404, map[string]string{"error": "local live file not found"})
+			return
+		}
+		ch, _ := parseM3UReader(strings.NewReader(string(data)))
+		if len(ch) == 0 {
+			ch = parseTVBoxTXT(string(data))
+		}
+		writeLiveChannelsJSON(w, ch, cacheKey)
 		return
 	}
 	// 单个 m3u8 地址 = 单个频道
