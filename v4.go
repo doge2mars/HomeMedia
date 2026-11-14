@@ -443,15 +443,19 @@ func handleSourcesDedupe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"removed": removed, "count": len(removed)})
 }
 
-// 订阅导入时也去重：同一归一化 api 已存在时，更新已有源、不建新 key
-func dedupeOnSubscribe(s subSource) (string, bool) {
-	rows, _ := db.Query(`SELECT key, api FROM sources`)
+// 订阅导入时也去重：同一归一化 api 已存在时，更新已有源、不建新 key；若原源无归属订阅，则认领到当前订阅
+func dedupeOnSubscribe(s subSource, subURL string) (string, bool) {
+	rows, _ := db.Query(`SELECT key, api, COALESCE(sub_url, '') FROM sources`)
 	defer rows.Close()
 	for rows.Next() {
-		var k, a string
-		rows.Scan(&k, &a)
+		var k, a, existingSub string
+		rows.Scan(&k, &a, &existingSub)
 		if normAPI(a) == normAPI(s.API) {
-			db.Exec(`UPDATE sources SET name=? WHERE key=?`, s.Name, k)
+			if existingSub == "" && subURL != "" {
+				db.Exec(`UPDATE sources SET name=?, sub_url=? WHERE key=?`, s.Name, subURL, k)
+			} else {
+				db.Exec(`UPDATE sources SET name=? WHERE key=?`, s.Name, k)
+			}
 			return k, true
 		}
 	}

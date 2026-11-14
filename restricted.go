@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/hmac"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -83,6 +84,11 @@ func handleRestrictedUnlock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 405, map[string]string{"error": "method"})
 		return
 	}
+	ip := clientIP(r)
+	if ok, retryAfter := pinLimiter.allow(ip); !ok {
+		writeJSON(w, 429, map[string]any{"error": fmt.Sprintf("尝试次数过多，请 %d 秒后再试", retryAfter)})
+		return
+	}
 	var b struct {
 		Pin string `json:"pin"`
 	}
@@ -91,9 +97,11 @@ func handleRestrictedUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(b.Pin) != getRestrictedPIN() {
+		pinLimiter.recordFailure(ip)
 		writeJSON(w, 403, map[string]string{"error": "PIN 码错误"})
 		return
 	}
+	pinLimiter.reset(ip)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "hm_pin_unlock",
 		Value:    pinUnlockToken(currentUser(r)),

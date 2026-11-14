@@ -212,8 +212,8 @@ func handleSourceSubscribe(w http.ResponseWriter, r *http.Request) {
 	n := 0
 	deduped := 0
 	for _, s := range srcs {
-		if _, existed := dedupeOnSubscribe(s); existed {
-			// 已有相同 api 的源只更新名称，不改归属：它可能是手动加的或别的订阅带来的
+		if _, existed := dedupeOnSubscribe(s, b.URL); existed {
+			// 已有相同 api 的源只更新名称；若原源无归属订阅则认领到当前订阅
 			deduped++
 			continue
 		}
@@ -244,7 +244,9 @@ func subNameOf(raw string) string {
 
 func saveSubscription(raw string) {
 	now := time.Now().Unix()
-	_, _ = db.Exec(`INSERT INTO subscriptions(url, name, created_at, updated_at) VALUES(?,?,?,?) ON CONFLICT(url) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at`, raw, subNameOf(raw), now, now)
+	if _, err := db.Exec(`INSERT INTO subscriptions(url, name, created_at, updated_at) VALUES(?,?,?,?) ON CONFLICT(url) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at`, raw, subNameOf(raw), now, now); err != nil {
+		log.Printf("saveSubscription failed %s: %v", raw, err)
+	}
 }
 
 // refreshSubscription：重抓订阅并替换该订阅带来的源。抓取/解析失败时原样保留，不动旧源。
@@ -262,7 +264,7 @@ func refreshSubscription(raw string) (imported, total int, err error) {
 		return 0, 0, err
 	}
 	for _, s := range srcs {
-		if _, existed := dedupeOnSubscribe(s); existed {
+		if _, existed := dedupeOnSubscribe(s, raw); existed {
 			continue
 		}
 		if _, err := db.Exec(`INSERT OR REPLACE INTO sources(key, name, api, disabled, sub_url) VALUES(?,?,?,0,?)`, s.Key, s.Name, s.API, raw); err == nil {
@@ -274,10 +276,10 @@ func refreshSubscription(raw string) (imported, total int, err error) {
 	return imported, len(srcs), nil
 }
 
-func refreshAllSubscriptions() {
+func refreshAllSubscriptions() (okCount, failCount int) {
 	rows, err := db.Query(`SELECT url FROM subscriptions`)
 	if err != nil {
-		return
+		return 0, 0
 	}
 	var urls []string
 	for rows.Next() {
@@ -290,10 +292,13 @@ func refreshAllSubscriptions() {
 	for _, u := range urls {
 		if n, total, err := refreshSubscription(u); err != nil {
 			log.Printf("subscription refresh failed %s: %v", u, err)
+			failCount++
 		} else {
 			log.Printf("subscription refreshed %s: %d/%d", u, n, total)
+			okCount++
 		}
 	}
+	return okCount, failCount
 }
 
 func handleSubscriptionsList(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +356,140 @@ func handleSubscriptionDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"removed_sources": removed})
 }
 
-// ---- 直播订阅导入：M3U / TVBox TXT / TVBox JSON / live import JSON ----
+func handleSubscriptionsUpdateAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	okCount, failCount := refreshAllSubscriptions()
+	liveOk, liveFail := refreshAllLiveSubscriptions()
+	writeJSON(w, 200, map[string]any{
+		"ok":          true,
+		"refreshed":   okCount,
+		"failed":      failCount,
+		"live_ok":     liveOk,
+		"live_failed": liveFail,
+	})
+}
+
+// ---- 直播订阅导入与保留：M3U / TVBox TXT / TVBox JSON / live import JSON ----
+
+func saveLiveSubscription(raw, name string) {
+	if name == "" {
+		name = subNameOf(raw)
+	}
+	now := time.Now().Unix()
+	if _, err := db.Exec(`INSERT INTO live_subscriptions(url, name, created_at, updated_at) VALUES(?,?,?,?) ON CONFLICT(url) DO UPDATE SET name=CASE WHEN excluded.name!='' THEN excluded.name ELSE live_subscriptions.name END, updated_at=excluded.updated_at`, raw, name, now, now); err != nil {
+		log.Printf("saveLiveSubscription failed %s: %v", raw, err)
+	}
+}
+
+func importLiveSubscription(raw, name string) (imported int, format string, status int, err error) {
+	if name == "" {
+		_ = db.QueryRow(`SELECT name FROM live_subscriptions WHERE url=?`, raw).Scan(&name)
+	}
+	body, _, err := fetchSubscription(raw)
+	if err != nil {
+		return 0, "", 502, err
+	}
+	text := strings.TrimSpace(string(body))
+	keyBase := name
+	if keyBase == "" {
+		keyBase = subNameOf(raw)
+	}
+	keyBase = regexp.MustCompile(`[^a-zA-Z0-9_-]+`).ReplaceAllString(keyBase, "_")
+	if keyBase == "" || keyBase == "_" {
+		keyBase = "sub"
+	}
+	// A) TVBox JSON / live import JSON
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) == nil {
+		var lives []any
+		if v, ok := obj["lives"].([]any); ok {
+			lives = v
+		} else if v, ok := obj["sources"].([]any); ok {
+			lives = v
+		}
+		if len(lives) > 0 {
+			type parsedLive struct {
+				key, name, url, ua, epg string
+			}
+			var items []parsedLive
+			for i, el := range lives {
+				if m, ok := el.(map[string]any); ok {
+					u := sField(m, "url")
+					if u == "" {
+						if urls, ok := m["urls"].([]any); ok && len(urls) > 0 {
+							if s, ok := urls[0].(string); ok {
+								u = s
+							}
+						}
+					}
+					if u == "" {
+						continue
+					}
+					k := fmt.Sprintf("%s_%d", keyBase, i)
+					if v := sField(m, "key"); v != "" {
+						k = v
+					}
+					items = append(items, parsedLive{k, sField(m, "name"), u, sField(m, "ua"), sField(m, "epg")})
+				}
+			}
+			if len(items) > 0 {
+				_, _ = db.Exec(`DELETE FROM livesources WHERE sub_url=?`, raw)
+				for _, it := range items {
+					if _, err := db.Exec(`INSERT OR REPLACE INTO livesources(key, name, url, ua, epg, disabled, sub_url) VALUES(?,?,?,?,?,0,?)`, it.key, it.name, it.url, it.ua, it.epg, raw); err == nil {
+						imported++
+					}
+				}
+				saveLiveSubscription(raw, name)
+				return imported, "tvbox-json", 200, nil
+			}
+		}
+	}
+	// B) M3U 或 TXT：整条订阅存为一个直播源，频道按分组解析（parseM3U / parseTVBoxTXT）
+	if strings.HasPrefix(text, "#EXTM3U") || strings.Contains(text, "#EXTINF") || strings.Contains(text, ",#genre#") {
+		_, _ = db.Exec(`DELETE FROM livesources WHERE sub_url=?`, raw)
+		k := keyBase
+		dispName := name
+		if dispName == "" {
+			dispName = raw
+		}
+		if _, err := db.Exec(`INSERT OR REPLACE INTO livesources(key, name, url, ua, epg, disabled, sub_url) VALUES(?,?,?,?,?,0,?)`, k, dispName, raw, "", "", raw); err == nil {
+			imported = 1
+		}
+		saveLiveSubscription(raw, dispName)
+		return imported, "m3u-or-txt-subscription", 200, nil
+	}
+	return 0, "", 400, fmt.Errorf("unrecognized live subscription format")
+}
+
+func refreshAllLiveSubscriptions() (okCount, failCount int) {
+	rows, err := db.Query(`SELECT url, name FROM live_subscriptions`)
+	if err != nil {
+		return 0, 0
+	}
+	type subRow struct{ url, name string }
+	var subs []subRow
+	for rows.Next() {
+		var s subRow
+		if err := rows.Scan(&s.url, &s.name); err == nil {
+			subs = append(subs, s)
+		}
+	}
+	rows.Close()
+	for _, s := range subs {
+		if n, _, _, err := importLiveSubscription(s.url, s.name); err != nil {
+			log.Printf("live subscription refresh failed %s: %v", s.url, err)
+			failCount++
+		} else {
+			log.Printf("live subscription refreshed %s: %d", s.url, n)
+			okCount++
+		}
+	}
+	return okCount, failCount
+}
+
 func handleLiveSubscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]string{"error": "method"})
@@ -365,65 +503,67 @@ func handleLiveSubscribe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "missing url"})
 		return
 	}
-	body, _, err := fetchSubscription(b.URL)
+	imported, format, status, err := importLiveSubscription(b.URL, b.Name)
 	if err != nil {
-		writeJSON(w, 502, map[string]string{"error": err.Error()})
+		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
-	text := strings.TrimSpace(string(body))
-	keyBase := b.Name
-	if keyBase == "" {
-		keyBase = "sub"
-	}
-	keyBase = regexp.MustCompile(`[^a-zA-Z0-9_-]+`).ReplaceAllString(keyBase, "_")
-	imported := 0
-	// A) TVBox JSON / live import JSON
-	var obj map[string]any
-	if json.Unmarshal(body, &obj) == nil {
-		var lives []any
-		if v, ok := obj["lives"].([]any); ok {
-			lives = v
-		} else if v, ok := obj["sources"].([]any); ok {
-			lives = v
-		}
-		for i, el := range lives {
-			if m, ok := el.(map[string]any); ok {
-				u := sField(m, "url")
-				if u == "" {
-					if urls, ok := m["urls"].([]any); ok && len(urls) > 0 {
-						if s, ok := urls[0].(string); ok {
-							u = s
-						}
-					}
-				}
-				if u == "" {
-					continue
-				}
-				k := fmt.Sprintf("%s_%d", keyBase, i)
-				if v := sField(m, "key"); v != "" {
-					k = v
-				}
-				db.Exec(`INSERT OR REPLACE INTO livesources(key, name, url, ua, epg, disabled) VALUES(?,?,?,?,?,0)`, k, sField(m, "name"), u, sField(m, "ua"), sField(m, "epg"))
-				imported++
+	writeJSON(w, 200, map[string]any{"imported": imported, "format": format})
+}
+
+func handleLiveSubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	rows, _ := db.Query(`SELECT s.url, s.name, s.updated_at, (SELECT COUNT(*) FROM livesources WHERE sub_url=s.url) FROM live_subscriptions s ORDER BY s.updated_at DESC`)
+	out := []map[string]any{}
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var url, name string
+			var updated int64
+			var cnt int
+			if err := rows.Scan(&url, &name, &updated, &cnt); err == nil {
+				out = append(out, map[string]any{"url": url, "name": name, "updated_at": updated, "count": cnt})
 			}
 		}
-		if imported > 0 {
-			writeJSON(w, 200, map[string]any{"imported": imported, "format": "tvbox-json"})
-			return
-		}
 	}
-	// B) M3U 或 TXT：整条订阅存为一个直播源，频道按分组解析（parseM3U / parseTVBoxTXT）
-	if strings.HasPrefix(text, "#EXTM3U") || strings.Contains(text, "#EXTINF") || strings.Contains(text, ",#genre#") {
-		k := keyBase
-		name := b.Name
-		if name == "" {
-			name = b.URL
-		}
-		db.Exec(`INSERT OR REPLACE INTO livesources(key, name, url, ua, epg, disabled) VALUES(?,?,?,?,?,0)`, k, name, b.URL, "", "")
-		writeJSON(w, 200, map[string]any{"imported": 1, "format": "m3u-or-txt-subscription"})
+	writeJSON(w, 200, map[string]any{"subscriptions": out})
+}
+
+func handleLiveSubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
 		return
 	}
-	writeJSON(w, 400, map[string]string{"error": "unrecognized live subscription format"})
+	var b struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.URL == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	imported, format, status, err := importLiveSubscription(b.URL, "")
+	if err != nil {
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"imported": imported, "format": format})
+}
+
+func handleLiveSubscriptionDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	var b struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.URL == "" {
+		writeJSON(w, 400, map[string]string{"error": "missing url"})
+		return
+	}
+	res, _ := db.Exec(`DELETE FROM livesources WHERE sub_url=?`, b.URL)
+	removed, _ := res.RowsAffected()
+	_, _ = db.Exec(`DELETE FROM live_subscriptions WHERE url=?`, b.URL)
+	writeJSON(w, 200, map[string]any{"removed_sources": removed})
 }
 
 // TVBox TXT 解析：分组行 "分组,#genre#"，频道行 "名称,地址"（地址可多个 $ 分隔取第一个）

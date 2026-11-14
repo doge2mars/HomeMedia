@@ -112,22 +112,36 @@ func parsePlayURLs(playURL string) []string {
 		return nil
 	}
 	groups := strings.Split(playURL, "$$$")
+	var best []string
+	bestHasM3U8 := false
 	for _, g := range groups {
 		parts := strings.Split(g, "#")
 		var eps []string
+		hasM3U8 := false
 		for _, p := range parts {
 			seg := strings.Split(p, "$")
+			var u string
 			if len(seg) >= 2 {
-				eps = append(eps, seg[len(seg)-1])
+				u = seg[len(seg)-1]
 			} else if strings.Contains(p, "http") {
-				eps = append(eps, p)
+				u = p
+			}
+			if u != "" {
+				eps = append(eps, u)
+				if strings.Contains(strings.ToLower(u), ".m3u8") {
+					hasM3U8 = true
+				}
 			}
 		}
-		if len(eps) > 0 {
-			return eps
+		if len(eps) == 0 {
+			continue
+		}
+		if len(best) == 0 || (hasM3U8 && !bestHasM3U8) || (hasM3U8 == bestHasM3U8 && len(eps) > len(best)) {
+			best = eps
+			bestHasM3U8 = hasM3U8
 		}
 	}
-	return nil
+	return best
 }
 
 func searchSource(s Source, q string) ([]SearchItem, error) {
@@ -910,8 +924,9 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	isLive := r.URL.Query().Get("live") == "1"
 	// VOD 播放列表（含 #EXT-X-ENDLIST）缓存 5 分钟；直播不缓存，永远实时取
-	if r.URL.Query().Get("fresh") != "1" {
+	if !isLive && r.URL.Query().Get("fresh") != "1" {
 		if v, ok := cacheGet("m3u8:" + raw); ok {
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -965,7 +980,7 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.Contains(ct, "mpegurl") || strings.Contains(raw, ".m3u8") {
 		out := rewriteM3U8(filterAdsFromM3U8(string(body)), raw)
-		if strings.Contains(out, "#EXT-X-ENDLIST") {
+		if !isLive && strings.Contains(out, "#EXT-X-ENDLIST") {
 			cacheSet("m3u8:"+raw, out, 5*time.Minute)
 		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
@@ -976,6 +991,7 @@ func handleProxyM3U8(w http.ResponseWriter, r *http.Request) {
 	}
 	// 非 m3u8 直接透传
 	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write(body)
 }
 

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -114,6 +116,7 @@ func main() {
 	mux.HandleFunc("/api/sources/subscribe", auth(ownerOnly(handleSourceSubscribe)))
 	mux.HandleFunc("/api/subscriptions", auth(ownerOnly(handleSubscriptionsList)))
 	mux.HandleFunc("/api/subscriptions/update", auth(ownerOnly(handleSubscriptionUpdate)))
+	mux.HandleFunc("/api/subscriptions/update-all", auth(ownerOnly(handleSubscriptionsUpdateAll)))
 	mux.HandleFunc("/api/subscriptions/delete", auth(ownerOnly(handleSubscriptionDelete)))
 	mux.HandleFunc("/api/source/test", auth(handleSourceTest))
 	mux.HandleFunc("/api/detail-aggregate", auth(handleDetailAggregate))
@@ -134,6 +137,9 @@ func main() {
 	mux.HandleFunc("/api/tmdb/trending", auth(handleTMDBTrending))
 	mux.HandleFunc("/api/live/sources", auth(handleLiveSourcesV2))
 	mux.HandleFunc("/api/live/subscribe", auth(ownerOnly(handleLiveSubscribe)))
+	mux.HandleFunc("/api/live/subscriptions", auth(ownerOnly(handleLiveSubscriptionsList)))
+	mux.HandleFunc("/api/live/subscriptions/update", auth(ownerOnly(handleLiveSubscriptionUpdate)))
+	mux.HandleFunc("/api/live/subscriptions/delete", auth(ownerOnly(handleLiveSubscriptionDelete)))
 	mux.HandleFunc("/api/live/channels", auth(handleLiveChannelsV3))
 	mux.HandleFunc("/api/live", auth(handleLive))
 	mux.HandleFunc("/api/play/best", auth(handlePlayBest))
@@ -173,6 +179,7 @@ func initDB() error {
 		`CREATE TABLE IF NOT EXISTS cache(k TEXT PRIMARY KEY, v TEXT, expires_at INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS user_settings(username TEXT, k TEXT, v TEXT, PRIMARY KEY(username, k))`,
 		`CREATE TABLE IF NOT EXISTS subscriptions(url TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', created_at INTEGER, updated_at INTEGER)`,
+		`CREATE TABLE IF NOT EXISTS live_subscriptions(url TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', created_at INTEGER, updated_at INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS upcoming(title TEXT, cover TEXT, type TEXT, release_date TEXT, genre TEXT, region TEXT, director TEXT, actors TEXT, source TEXT, updated_at INTEGER, PRIMARY KEY(title, release_date, type))`,
 		`CREATE TABLE IF NOT EXISTS wants(username TEXT, title TEXT, cover TEXT, year TEXT, source_name TEXT, release_date TEXT, save_time INTEGER, PRIMARY KEY(username, title))`,
 	}
@@ -187,8 +194,9 @@ func initDB() error {
 	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN hits_week INTEGER NOT NULL DEFAULT 0`)
 	// 受限内容锁（4 位 PIN）：标记“其他”分类及落入电影等分类的福利/伦理等敏感条目
 	_, _ = db.Exec(`ALTER TABLE catalog ADD COLUMN restricted INTEGER NOT NULL DEFAULT 0`)
-	// 订阅带来的源归属：sources.sub_url 记订阅地址，更新订阅时只替换它带来的源
+	// 订阅带来的源归属：sources.sub_url / livesources.sub_url 记订阅地址，更新订阅时只替换它带来的源
 	_, _ = db.Exec(`ALTER TABLE sources ADD COLUMN sub_url TEXT`)
+	_, _ = db.Exec(`ALTER TABLE livesources ADD COLUMN sub_url TEXT`)
 	rows, err := db.Query(`SELECT title, year, type, genre FROM catalog WHERE kind IS NULL OR kind=''`)
 	if err == nil {
 		type row struct{ title, year, typ, genre string }
@@ -337,9 +345,81 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+type attemptState struct {
+	fails       int
+	lockedUntil time.Time
+}
+
+type ipRateLimiter struct {
+	mu      sync.Mutex
+	entries map[string]attemptState
+}
+
+func newIPRateLimiter() *ipRateLimiter {
+	return &ipRateLimiter{entries: make(map[string]attemptState)}
+}
+
+func clientIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		if ip := strings.TrimSpace(strings.Split(xff, ",")[0]); ip != "" {
+			return ip
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func (l *ipRateLimiter) allow(ip string) (bool, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	st, ok := l.entries[ip]
+	if !ok {
+		return true, 0
+	}
+	now := time.Now()
+	if now.Before(st.lockedUntil) {
+		rem := int(st.lockedUntil.Sub(now).Seconds()) + 1
+		return false, rem
+	}
+	if !st.lockedUntil.IsZero() && now.After(st.lockedUntil) {
+		delete(l.entries, ip)
+	}
+	return true, 0
+}
+
+func (l *ipRateLimiter) recordFailure(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	st := l.entries[ip]
+	st.fails++
+	if st.fails >= 5 {
+		st.lockedUntil = time.Now().Add(60 * time.Second)
+		st.fails = 0
+	}
+	l.entries[ip] = st
+}
+
+func (l *ipRateLimiter) reset(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.entries, ip)
+}
+
+var (
+	loginLimiter = newIPRateLimiter()
+	pinLimiter   = newIPRateLimiter()
+)
+
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]string{"error": "method"})
+		return
+	}
+	ip := clientIP(r)
+	if ok, retryAfter := loginLimiter.allow(ip); !ok {
+		writeJSON(w, 429, map[string]any{"error": fmt.Sprintf("too many failed attempts, retry in %ds", retryAfter)})
 		return
 	}
 	var b struct {
@@ -353,9 +433,11 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	var role, passhash string
 	err := db.QueryRow(`SELECT role, passhash FROM users WHERE username=?`, b.Username).Scan(&role, &passhash)
 	if err != nil || passhash != hashPass(b.Username, b.Password) {
+		loginLimiter.recordFailure(ip)
 		writeJSON(w, 401, map[string]string{"error": "bad credentials"})
 		return
 	}
+	loginLimiter.reset(ip)
 	setAuthCookies(w, b.Username, role)
 	writeJSON(w, 200, map[string]string{"username": b.Username, "role": role})
 }
@@ -681,7 +763,11 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 	default:
 		sqlQ += ` ORDER BY hits_week DESC, updated_at DESC LIMIT ?`
 	}
-	args = append(args, limit)
+	fetchLimit := limit * 2
+	if fetchLimit > 200 {
+		fetchLimit = 200
+	}
+	args = append(args, fetchLimit)
 	rows, err := db.Query(sqlQ, args...)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -689,6 +775,7 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	out := []map[string]any{}
+	seen := make(map[string]bool, limit)
 	maxHits := 0
 	for rows.Next() {
 		var title, poster, y, reg, gen, typ2, did, rating, syn string
@@ -697,7 +784,15 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		if hitsWeek > maxHits {
 			maxHits = hitsWeek
 		}
+		dedupeKey := strings.ToLower(strings.TrimSpace(title)) + "|" + strings.TrimSpace(y)
+		if seen[dedupeKey] {
+			continue
+		}
+		seen[dedupeKey] = true
 		out = append(out, map[string]any{"title": title, "poster": poster, "year": y, "region": reg, "genre": gen, "type": typ2, "douban_id": did, "rating": rating, "synopsis": syn, "hits_week": hitsWeek})
+		if len(out) >= limit {
+			break
+		}
 	}
 	if q.Get("sort") == "hits_week" && maxHits == 0 {
 		// 回填完成前全是 0，排出来只是“最新入库”，别冒充热榜：返回空行，前端跳过该行
@@ -925,8 +1020,16 @@ func handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 //   - 间隔模式（daily_time 为空）：距上次同步 >= 间隔才跑。
 func syncSchedulerLoop() {
 	loc := time.FixedZone("Asia/Shanghai", 8*3600)
+	var lastSubRefresh int64
 	for {
 		time.Sleep(5 * time.Minute)
+		nowUnix := time.Now().Unix()
+		// 订阅每 12 小时独立自动刷新一次（即使关闭了货架自动同步，订阅源也保持最新）
+		if nowUnix-lastSubRefresh >= 12*3600 {
+			refreshAllSubscriptions()
+			refreshAllLiveSubscriptions()
+			lastSubRefresh = nowUnix
+		}
 		cfg := getSyncConfig()
 		if !cfg.Auto {
 			continue
@@ -940,13 +1043,15 @@ func syncSchedulerLoop() {
 			if getLastSyncUnix() > 0 && last.Format("2006-01-02") == now.Format("2006-01-02") {
 				continue
 			}
-		} else if time.Now().Unix()-getLastSyncUnix() < int64(cfg.IntervalHours)*3600 {
+		} else if nowUnix-getLastSyncUnix() < int64(cfg.IntervalHours)*3600 {
 			continue
 		}
+		// 先刷新订阅拿到最新源列表，再启动目录同步
+		refreshAllSubscriptions()
+		refreshAllLiveSubscriptions()
+		lastSubRefresh = nowUnix
 		if runSyncIfFree(cfg) {
 			triggerUpcomingRefresh()
-			// 定时同步顺带刷新已保留的订阅（失败只记日志，不影响目录同步结果）
-			refreshAllSubscriptions()
 		}
 	}
 }
